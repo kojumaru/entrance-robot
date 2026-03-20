@@ -1,0 +1,7 @@
+.env
+voicevox_core/
+__pycache__/
+*.pyc
+.vscode/
+audio/
+download
