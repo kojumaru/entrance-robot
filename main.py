@@ -42,6 +42,21 @@ VOICEVOX_SPEAKER = 8        # 1: ずんだもん(ノーマル), 3: ずんだも�
 BARGE_IN_THRESHOLD = 10000  # バージイン検知の閾値
 BARGE_IN_DELAY = 0.5        # 再生開始後、この秒数は監視しない（エコー対策）
 _VOICEVOX_DIR = Path(__file__).parent / "voicevox_core"
+_FIREBASE_CREDENTIAL = Path(__file__).parent / "firebase_admin.json"
+
+# FirebaseのドキュメントID → 企画名マッピング
+FIREBASE_EXHIBIT_MAP = {
+    "arm":      "ワームホールロボットアーム",
+    "chess":    "ロボットチェス",
+    "pong":     "せいみつPONG",
+    "shooting": "お絵描きシューティング",
+    "soccer":   "ロボットサッカー",
+    "space":    "自己投影空間",
+    "switch":   "せいみつスイッチ",
+    "tank":     "ARタンク",
+    "truck":    "トロッコVR",
+}
+FIREBASE_POLL_INTERVAL = 30  # 混雑状況の更新間隔（秒）
 
 STANDBY_MESSAGES = [
     "精密ラボへようこそ！1階右と3階で工学のさまざまな企画を展示しています！",
@@ -127,6 +142,9 @@ class EntranceRobot:
         self._video_frame_queue: queue.Queue = queue.Queue(maxsize=2)
         self._start_volume_monitor()
 
+        self._congestion: dict = {}  # 混雑状況キャッシュ
+        self._start_firebase_poller()
+
     # ── VOICEVOX 初期化 ───────────────────────────────────────
 
     def _init_voicevox(self) -> Synthesizer:
@@ -165,6 +183,47 @@ class EntranceRobot:
             images.append(img)
         print(f"  [マップ] {len(images)}ページ読み込み完了")
         return images
+
+    # ── Firebase 混雑状況ポーリング ───────────────────────────
+
+    def _start_firebase_poller(self) -> None:
+        import firebase_admin
+        from firebase_admin import credentials, firestore
+
+        cred = credentials.Certificate(str(_FIREBASE_CREDENTIAL))
+        firebase_admin.initialize_app(cred)
+        db = firestore.client()
+
+        def _poll():
+            while True:
+                try:
+                    docs = db.collection("tickets").stream()
+                    result = {}
+                    for doc in docs:
+                        key = doc.id
+                        exhibit = FIREBASE_EXHIBIT_MAP.get(key)
+                        if exhibit is None:
+                            continue
+                        data = doc.to_dict()
+                        now_serving = data.get("nowServing", 0)
+                        current_number = data.get("currentNumber", 0)
+                        waiting = max(now_serving - current_number, 0)
+                        result[exhibit] = waiting
+                    self._congestion = result
+                    print(f"  [Firebase] 混雑状況更新: {result}")
+                except Exception as e:
+                    print(f"  [Firebase エラー] {e}")
+                time.sleep(FIREBASE_POLL_INTERVAL)
+
+        threading.Thread(target=_poll, daemon=True).start()
+
+    def _build_congestion_text(self) -> str:
+        if not self._congestion:
+            return ""
+        lines = ["【現在の整理券待ち人数】"]
+        for exhibit, waiting in self._congestion.items():
+            lines.append(f"- {exhibit}: {waiting}人待ち")
+        return "\n".join(lines)
 
     # ── 音量モニター ──────────────────────────────────────────
 
@@ -362,10 +421,11 @@ class EntranceRobot:
         with open(prompt_path, encoding="utf-8") as f:
             system_prompt = f.read()
 
-        # 過去の会話履歴 + 今回の発話をまとめてcontentsに渡す
-        contents = [{"role": "user", "parts": [{"text": system_prompt}]},
-                    {"role": "model", "parts": [{"text": "わかりました。JSON形式で回答します。"}]}]
-        contents += history
+        # 混雑状況をsystem_instructionに付加
+        congestion_text = self._build_congestion_text()
+        full_system = system_prompt + (f"\n\n{congestion_text}" if congestion_text else "")
+
+        contents = list(history)
         contents.append({"role": "user", "parts": [{"text": user_input}]})
 
         try:
@@ -374,6 +434,7 @@ class EntranceRobot:
                 model="gemini-2.5-flash",
                 contents=contents,
                 config=types.GenerateContentConfig(
+                    system_instruction=full_system,
                     response_mime_type="application/json"
                 ),
             )
@@ -547,10 +608,17 @@ class EntranceRobot:
 
     def _switch_to(self, new_state: RobotState) -> None:
         self._stop_event.set()
+        self._video_generation += 1  # 動画プレーヤースレッドを確実に停止
         if (self._current_thread and self._current_thread.is_alive()
                 and self._current_thread != threading.current_thread()):
             self._current_thread.join(timeout=2)
         self._stop_event.clear()
+        # 動画キューを空にして古いフレームが写真を上書きしないようにする
+        while not self._video_frame_queue.empty():
+            try:
+                self._video_frame_queue.get_nowait()
+            except queue.Empty:
+                break
         self.state = new_state
         target = (
             self._standby_loop

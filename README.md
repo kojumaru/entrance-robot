@@ -1,11 +1,13 @@
 ## これからやること
 
 こうじ
-- firebaseと連携して混雑状況をマップに可視化
+
+- firebaseと連携して（←3/22ここまでできた）混雑状況をマップに可視化
 - 混雑状況からおすすめ企画に誘導
 - 五月祭パンフレットを読み込ませて、精密ラボ以外のことを聞かれた時にも答えられるようにする
 
 太田
+
 - ウェブカメラからの画像認識で話しかけられているモードを検知し、`robot._switch_to(RobotState.INTERACTION)` を呼んで対話モードへ自動切替。STANDBYモードへの戻し方も実装。
   詳細は上記「モード切替の仕組み（外部連携向け）」セクションを参照
 - 目の実装
@@ -24,11 +26,13 @@
 ## システム Abstruct
 
 ```
+Firebase Firestore（整理券待ち人数）← 30秒ごとにポーリング
+    ↓
 マイク入力
     ↓
 Google STT（音声認識）
     ↓
-Gemini API（回答・企画名を JSON で生成）
+Gemini API（回答・企画名を JSON で生成）← 混雑状況をプロンプトに注入
     ↓
 VOICEVOX（音声合成） → スピーカー出力
         ↓
@@ -243,7 +247,22 @@ chmod +x download
 GEMINI_API_KEY=your_api_key_here
 ```
 
-### 4. 起動
+### 4. Firebase サービスアカウントキーの設置
+
+混雑状況のリアルタイム取得に Firebase Admin SDK を使用しています。
+
+1. [Firebase Console](https://console.firebase.google.com/) → プロジェクト設定 → サービスアカウント
+2. 「新しい秘密鍵の生成」でJSONファイルをダウンロード
+3. ダウンロードしたファイルをプロジェクトルートに `firebase_admin.json` という名前で配置
+
+```
+entrance_robot/
+└── firebase_admin.json   ← ここに置く（.gitignore済み・Gitには含まれない）
+```
+
+> このファイルはGit管理外のため、各自で取得・配置が必要です。
+
+### 5. 起動
 
 ```bash
 python main.py
