@@ -207,8 +207,10 @@ class EntranceRobot:
                         data = doc.to_dict()
                         now_serving = data.get("nowServing", 0)
                         current_number = data.get("currentNumber", 0)
+                        time_per = data.get("timePerPerson", 3)  # 1人あたりの体験時間（分）
                         waiting = max(now_serving - current_number, 0)
-                        result[exhibit] = waiting
+                        estimated_minutes = waiting * time_per
+                        result[exhibit] = {"waiting": waiting, "minutes": estimated_minutes}
                     self._congestion = result
                     print(f"  [Firebase] 混雑状況更新: {result}")
                 except Exception as e:
@@ -220,9 +222,14 @@ class EntranceRobot:
     def _build_congestion_text(self) -> str:
         if not self._congestion:
             return ""
-        lines = ["【現在の整理券待ち人数】"]
-        for exhibit, waiting in self._congestion.items():
-            lines.append(f"- {exhibit}: {waiting}人待ち")
+        lines = ["【現在の整理券待ち状況】"]
+        for exhibit, info in self._congestion.items():
+            waiting = info["waiting"]
+            minutes = info["minutes"]
+            if waiting == 0:
+                lines.append(f"- {exhibit}: 今すぐ体験できます（待ち0人）")
+            else:
+                lines.append(f"- {exhibit}: 約{minutes}分待ち（{waiting}人待ち）")
         return "\n".join(lines)
 
     # ── 音量モニター ──────────────────────────────────────────
