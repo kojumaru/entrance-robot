@@ -35,7 +35,7 @@ from voicevox_core.blocking import Onnxruntime, OpenJtalk, Synthesizer, VoiceMod
 
 # ── 定数 ──────────────────────────────────────────────────────────────────────
 
-MIC_THRESHOLD = 500
+MIC_THRESHOLD = 300
 LISTEN_TIMEOUT = 8
 
 VOICEVOX_SPEAKER = 8        # 1: ずんだもん(ノーマル), 3: ずんだもん(あまあま), 8: 春日部つむぎ
@@ -44,23 +44,44 @@ BARGE_IN_DELAY = 0.5        # 再生開始後、この秒数は監視しない�
 _VOICEVOX_DIR = Path(__file__).parent / "voicevox_core"
 _FIREBASE_CREDENTIAL = Path(__file__).parent / "firebase_admin.json"
 
-# FirebaseのドキュメントID → 企画名マッピング
-FIREBASE_EXHIBIT_MAP = {
-    "arm":      "ワームホールロボットアーム",
-    "chess":    "ロボットチェス",
-    "pong":     "せいみつPONG",
-    "shooting": "お絵描きシューティング",
+# 企画key → 企画名マッピング（Geminiの出力・Firebase両方で使用）
+EXHIBIT_KEY_MAP = {
+    # 3階
     "soccer":   "ロボットサッカー",
-    "space":    "自己投影空間",
+    "chess":    "ロボットチェス",
+    "arm":      "ワームホールロボットアーム",
     "switch":   "せいみつスイッチ",
-    "tank":     "ARタンク",
+    "dress":    "AI着替えカメラ",
+    "shooting": "お絵描きシューティング",
+    "media":    "メディアアート",
+    "space":    "自己投影空間",
     "truck":    "トロッコVR",
+    # 1階
+    "pendulum": "スーパー倒立振子",
+    "tank":     "ARタンク",
+    "pong":     "せいみつPONG",
+    "balloon":  "バルーンロボット",
+    "connect4": "立体四目並べ",
+    "handwrite":"筆談ロボット",
+    "janken":   "じゃんけんAI",
+    "reception":"受付ロボット",
 }
 FIREBASE_POLL_INTERVAL = 30  # 混雑状況の更新間隔（秒）
+QUEUE_BUFFER_MINUTES = 10   # 番号呼び出し後に列に並ぶまでの目安時間（分）
 
 STANDBY_MESSAGES = [
     "精密ラボへようこそ！1階右と3階で工学のさまざまな企画を展示しています！",
     "こんにちは！精密ラボの展示をご案内します！",
+]
+
+FAREWELL_KEYWORDS = [
+    "ありがとう", "どうも", "助かりました", "わかりました", "了解",
+    "大丈夫です", "いいです", "結構です", "以上です", "バイバイ", "さようなら",
+]
+FAREWELL_RESPONSES = [
+    "どういたしまして。ぜひ楽しんでくださいね！",
+    "お役に立てて嬉しいです。ごゆっくりどうぞ！",
+    "またいつでも声をかけてくださいね！",
 ]
 
 THINKING_MESSAGES = [
@@ -81,28 +102,21 @@ EXHIBIT_LOCATIONS = {
     "ワームホールロボットアーム":   {"x": 0.40, "y": 0.14},
     "せいみつスイッチ":           {"x": 0.52, "y": 0.14},
     "AI着替えカメラ":             {"x": 0.62, "y": 0.13},
-    "お絵描きシューティング":      {"x": 0.72, "y": 0.14},
-    "メディアアート":             {"x": 0.11, "y": 0.40},
-    "自己投影空間":               {"x": 0.62, "y": 0.33},
-    "トロッコVR":                 {"x": 0.62, "y": 0.43},
+    "お絵描きシューティング":      {"x": 0.7, "y": 0.13},
+    "メディアアート":             {"x": 0.13, "y": 0.36},
+    "自己投影空間":               {"x": 0.64, "y": 0.3},
+    "トロッコVR":                 {"x": 0.64, "y": 0.39},
     # 1階
-    "スーパー倒立振子":           {"x": 0.22, "y": 0.68},
-    "ARタンク":                  {"x": 0.30, "y": 0.73},
-    "せいみつPONG":              {"x": 0.29, "y": 0.81},
-    "バルーンロボット":           {"x": 0.13, "y": 0.82},
-    "立体四目並べ":               {"x": 0.41, "y": 0.82},
-    "筆談ロボット":               {"x": 0.52, "y": 0.76},
-    "じゃんけんAI":              {"x": 0.76, "y": 0.67},
-    "受付ロボット":               {"x": 0.87, "y": 0.67},
+    "スーパー倒立振子":           {"x": 0.27, "y": 0.7},
+    "ARタンク":                  {"x": 0.35, "y": 0.73},
+    "せいみつPONG":              {"x": 0.35, "y": 0.81},
+    "バルーンロボット":           {"x": 0.15, "y": 0.82},
+    "立体四目並べ":               {"x": 0.45, "y": 0.82},
+    "筆談ロボット":               {"x": 0.55, "y": 0.76},
+    "じゃんけんAI":              {"x": 0.78, "y": 0.7},
+    "受付ロボット":               {"x": 0.9, "y": 0.7},
 }
 
-# Geminiが誤変換した場合の正規名への変換マップ
-EXHIBIT_ALIASES = {
-    "精密スイッチ":   "せいみつスイッチ",
-    "精密PONG":      "せいみつPONG",
-    "精密ポン":      "せいみつPONG",
-    "せいみつポン":  "せいみつPONG",
-}
 
 
 class RobotState(Enum):
@@ -136,11 +150,18 @@ class EntranceRobot:
         self._standby_wavs: list[str] = self._presynth_standby_messages()
         self._greeting_wav: str = self._presynth_wav("こんにちは！何かご質問はありますか？")
         self._thinking_wavs: list[str] = [self._presynth_wav(m) for m in THINKING_MESSAGES]
+        self._thinking_channel = pygame.mixer.Channel(1)  # 専用チャンネル（GIL対策）
+        self._thinking_loop_sound = self._make_thinking_loop_sound()  # 結合ループ音声
+        self._farewell_wavs: list[str] = [self._presynth_wav(m) for m in FAREWELL_RESPONSES]
 
         self._mic_rms: float = 0.0
+        self._is_listening: bool = False
         self._video_generation: int = 0
         self._video_frame_queue: queue.Queue = queue.Queue(maxsize=2)
         self._start_volume_monitor()
+        self._bubble_font = self._load_jp_font(15)
+        self._listen_font = self._load_jp_font(32)
+        self._label_font = self._load_jp_font(22)
 
         self._congestion: dict = {}  # 混雑状況キャッシュ
         self._start_firebase_poller()
@@ -166,6 +187,22 @@ class EntranceRobot:
         return synthesizer
 
     # ── ユーティリティ ────────────────────────────────────────
+
+    def _ts(self, label: str) -> None:
+        """タイムスタンプ付きでログ出力"""
+        t = time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}"
+        print(f"  [{t}] {label}")
+
+    def _load_jp_font(self, size: int) -> pygame.font.Font:
+        for path in (
+            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        ):
+            try:
+                return pygame.font.Font(path, size)
+            except Exception:
+                pass
+        return pygame.font.SysFont(None, size)
 
     def _pil_to_surface(self, img: PILImage.Image) -> pygame.Surface:
         import numpy as np
@@ -201,7 +238,7 @@ class EntranceRobot:
                     result = {}
                     for doc in docs:
                         key = doc.id
-                        exhibit = FIREBASE_EXHIBIT_MAP.get(key)
+                        exhibit = EXHIBIT_KEY_MAP.get(key)
                         if exhibit is None:
                             continue
                         data = doc.to_dict()
@@ -209,7 +246,7 @@ class EntranceRobot:
                         current_number = data.get("currentNumber", 0)
                         time_per = data.get("timePerPerson", 3)  # 1人あたりの体験時間（分）
                         waiting = max(now_serving - current_number, 0)
-                        estimated_minutes = waiting * time_per
+                        estimated_minutes = waiting * time_per + QUEUE_BUFFER_MINUTES
                         result[exhibit] = {"waiting": waiting, "minutes": estimated_minutes}
                     self._congestion = result
                     print(f"  [Firebase] 混雑状況更新: {result}")
@@ -227,7 +264,7 @@ class EntranceRobot:
             waiting = info["waiting"]
             minutes = info["minutes"]
             if waiting == 0:
-                lines.append(f"- {exhibit}: 今すぐ体験できます（待ち0人）")
+                lines.append(f"- {exhibit}: 10分以内で体験できます")
             else:
                 lines.append(f"- {exhibit}: 約{minutes}分待ち（{waiting}人待ち）")
         return "\n".join(lines)
@@ -261,6 +298,28 @@ class EntranceRobot:
         f.write(wav)
         f.close()
         return f.name
+
+    def _make_thinking_loop_sound(self) -> pygame.mixer.Sound:
+        """ThinkingメッセージWAVを結合してループ再生用Soundを作成"""
+        import wave, io
+        frames_list = []
+        params = None
+        silence_sec = THINKING_INTERVAL
+        for wav_path in self._thinking_wavs:
+            with wave.open(wav_path) as wf:
+                if params is None:
+                    params = wf.getparams()
+                frames_list.append(wf.readframes(wf.getnframes()))
+                # セリフ間の無音
+                silence_frames = int(wf.getframerate() * silence_sec) * wf.getnchannels() * wf.getsampwidth()
+                frames_list.append(b'\x00' * silence_frames)
+        buf = io.BytesIO()
+        with wave.open(buf, 'wb') as wf:
+            wf.setparams(params)
+            for f in frames_list:
+                wf.writeframes(f)
+        buf.seek(0)
+        return pygame.mixer.Sound(buf)
 
     def _presynth_standby_messages(self) -> list[str]:
         print("  [事前合成] 呼び込みメッセージを合成中...")
@@ -339,17 +398,18 @@ class EntranceRobot:
 
     def _get_response_wav(self, user_input: str, history: list):
         """Gemini回答生成 + VOICEVOX合成 + 画像読み込みをまとめて行う"""
-        speech, exhibit = self.get_response(user_input, history)
+        speech, exhibit, should_continue = self.get_response(user_input, history)
+        self._ts("VOICEVOX合成 開始")
         wav_path = self._presynth_wav(speech)
-        exhibit = EXHIBIT_ALIASES.get(exhibit, exhibit) if exhibit else None
+        self._ts("VOICEVOX合成 完了")
         photo_pil = self._load_exhibit_photo(exhibit) if exhibit and EXHIBIT_LOCATIONS.get(exhibit) else None
-        return wav_path, exhibit, speech, photo_pil
+        return wav_path, exhibit, speech, photo_pil, should_continue
 
     def speak(self, text: str, interruptible: bool = False) -> bool:
-        t_voicevox_start = time.time()
+        self._ts("VOICEVOX合成 開始")
         audio_query = self.synthesizer.create_audio_query(text, VOICEVOX_SPEAKER)
         wav = self.synthesizer.synthesis(audio_query, VOICEVOX_SPEAKER)
-        print(f"  [計測] VOICEVOX合成: {time.time() - t_voicevox_start:.2f}s ({len(text)}文字)")
+        self._ts("VOICEVOX合成 完了")
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(wav)
@@ -397,22 +457,24 @@ class EntranceRobot:
         recognizer.energy_threshold = MIC_THRESHOLD
         recognizer.dynamic_energy_threshold = False
 
-        with sr.Microphone() as source:
-            print("  [マイク待機中...]")
-            try:
-                t0 = time.time()
-                audio = recognizer.listen(
-                    source, timeout=LISTEN_TIMEOUT, phrase_time_limit=10
-                )
-                t_recorded = time.time()
-                print(f"  [計測] 録音完了: {t_recorded - t0:.2f}s")
-            except sr.WaitTimeoutError:
-                return None, True  # タイムアウト
+        self._is_listening = True
+        try:
+            with sr.Microphone() as source:
+                self._ts("マイク待機 開始")
+                try:
+                    audio = recognizer.listen(
+                        source, timeout=LISTEN_TIMEOUT, phrase_time_limit=10
+                    )
+                    self._ts("録音 完了")
+                except sr.WaitTimeoutError:
+                    return None, True  # タイムアウト
+        finally:
+            self._is_listening = False
 
         try:
-            t_stt_start = time.time()
+            self._ts("Google STT 開始")
             text = recognizer.recognize_google(audio, language="ja-JP")
-            print(f"  [計測] Google STT: {time.time() - t_stt_start:.2f}s → 「{text}」")
+            self._ts(f"Google STT 完了 → 「{text}」")
             return text.strip() or None, False
         except sr.UnknownValueError:
             print("  [音声認識] 聞き取れず、再試行")
@@ -436,7 +498,7 @@ class EntranceRobot:
         contents.append({"role": "user", "parts": [{"text": user_input}]})
 
         try:
-            t_gemini_start = time.time()
+            self._ts("Gemini 開始")
             response = self.client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=contents,
@@ -445,15 +507,17 @@ class EntranceRobot:
                     response_mime_type="application/json"
                 ),
             )
-            print(f"  [計測] Gemini: {time.time() - t_gemini_start:.2f}s")
+            self._ts("Gemini 完了")
             raw = response.text
             data = json.loads(raw)
-            return data.get("speech", ""), data.get("exhibit") or None
+            exhibit_key = data.get("exhibit") or None
+            exhibit = EXHIBIT_KEY_MAP.get(exhibit_key) if exhibit_key else None
+            return data.get("speech", ""), exhibit, data.get("continue", True)
         except json.JSONDecodeError:
-            return raw, None
+            return raw, None, True
         except Exception as e:
             print(f"  [Gemini エラー] {e}")
-            return "すみません、もう一度お願いします", None
+            return "すみません、もう一度お願いします", None, True
 
     # ── 企画写真 ──────────────────────────────────────────────
 
@@ -476,6 +540,63 @@ class EntranceRobot:
         except Exception:
             draw.text((320, 240), exhibit_name, fill=(100, 100, 100))
         return img
+
+    # ── 吹き出し描画 ──────────────────────────────────────────
+
+    def _draw_congestion_bubbles(self, map_x: int, map_y: int, mw: int, mh: int) -> None:
+        """マップ上の各企画に待ち時間吹き出しを描画する"""
+        queue_exhibits = set(EXHIBIT_KEY_MAP[k] for k in ("soccer","chess","arm","switch","shooting","space","truck","tank","pong"))
+
+        no_bubble_exhibits = {"受付ロボット"}
+
+        for exhibit, loc in EXHIBIT_LOCATIONS.items():
+            if exhibit in no_bubble_exhibits:
+                continue
+            cx = map_x + int(loc["x"] * mw)
+            cy = map_y + int(loc["y"] * mh)
+
+            if exhibit in self._congestion:
+                info = self._congestion[exhibit]
+                waiting = info["waiting"]
+                minutes = info["minutes"]
+                if waiting == 0:
+                    text = "10分以内"
+                    bg = (30, 180, 80)
+                elif minutes <= 10:
+                    text = f"約{minutes}分"
+                    bg = (210, 170, 0)
+                else:
+                    text = f"約{minutes}分"
+                    bg = (200, 60, 40)
+            elif exhibit in queue_exhibits:
+                continue  # Firebase接続前は表示しない
+            else:
+                text = "整理券不要"
+                bg = (80, 100, 160)
+
+            self._draw_bubble(text, cx, cy, bg)
+
+    def _draw_bubble(self, text: str, cx: int, cy: int, bg: tuple) -> None:
+        font = self._bubble_font
+        text_surf = font.render(text, True, (255, 255, 255))
+        tw, th = text_surf.get_size()
+        pad_x, pad_y = 6, 3
+        bw = tw + pad_x * 2
+        bh = th + pad_y * 2
+        arrow_h = 6
+
+        bx = cx - bw // 2
+        by = cy - bh - arrow_h - 2
+
+        surf = pygame.Surface((bw, bh + arrow_h), pygame.SRCALPHA)
+        pygame.draw.rect(surf, (*bg, 210), (0, 0, bw, bh), border_radius=5)
+        pygame.draw.polygon(surf, (*bg, 210), [
+            (bw // 2 - 5, bh),
+            (bw // 2 + 5, bh),
+            (bw // 2,     bh + arrow_h),
+        ])
+        self.screen.blit(surf, (bx, by))
+        self.screen.blit(text_surf, (bx + pad_x, by + pad_y))
 
     # ── マップ表示 ────────────────────────────────────────────
 
@@ -551,32 +672,32 @@ class EntranceRobot:
             t_user_end = time.time()
             print(f"  [ユーザー] {user_input}")
 
+            # 別れの言葉はGeminiを介さず即座に返答して待機モードへ
+            if any(kw in user_input for kw in FAREWELL_KEYWORDS):
+                wav = random.choice(self._farewell_wavs)
+                pygame.mixer.music.load(wav)
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy():
+                    if self._stop_event.is_set():
+                        pygame.mixer.music.stop()
+                        break
+                    time.sleep(0.05)
+                time.sleep(1)
+                self._switch_to(RobotState.STANDBY)
+                return
+
             # Gemini + VOICEVOX合成をバックグラウンドで実行しながら考え中セリフを再生
+            # loops=-1で無限ループ再生 → SDL(C)が管理するためVOICEVOXのGIL保持中も継続
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(self._get_response_wav, user_input, history)
-                remaining = list(self._thinking_wavs)
-                random.shuffle(remaining)
+                self._thinking_channel.play(self._thinking_loop_sound, loops=-1)
                 while not future.done():
-                    if not remaining:
-                        remaining = list(self._thinking_wavs)
-                        random.shuffle(remaining)
-                    pygame.mixer.music.load(remaining.pop())
-                    pygame.mixer.music.play()
-                    time.sleep(0.1)  # play()直後はget_busy()がFalseになる場合があるため待機
-                    while pygame.mixer.music.get_busy() and not future.done():
-                        if self._stop_event.is_set():
-                            pygame.mixer.music.stop()
-                            return
-                        time.sleep(0.05)
-                    # セリフ間のインターバル（future完了なら即抜ける）
-                    interval_steps = int(THINKING_INTERVAL / 0.05)
-                    for _ in range(interval_steps):
-                        if future.done() or self._stop_event.is_set():
-                            break
-                        time.sleep(0.05)
-                while pygame.mixer.music.get_busy():
+                    if self._stop_event.is_set():
+                        self._thinking_channel.stop()
+                        return
                     time.sleep(0.05)
-                wav_path, exhibit, speech, photo_pil = future.result()
+                self._thinking_channel.stop()
+                wav_path, exhibit, speech, photo_pil, should_continue = future.result()
 
             # 会話履歴に追記（次回のGemini呼び出しに引き継ぐ）
             history.append({"role": "user",  "parts": [{"text": user_input}]})
@@ -598,9 +719,8 @@ class EntranceRobot:
                 with self._surface_lock:
                     self._right_surface = None
                     self._highlight_loc = None
-            t_speak_start = time.time()
             print(f"  [ロボット] {speech}")
-            print(f"  [計測] 発話終了→紬が喋り始めるまでの合計: {t_speak_start - t_user_end:.2f}s")
+            self._ts("発話 開始")
             # 合成済みWAVを直接再生
             pygame.mixer.music.load(wav_path)
             pygame.mixer.music.play()
@@ -611,10 +731,17 @@ class EntranceRobot:
                 time.sleep(0.05)
             os.unlink(wav_path)
 
+            if not should_continue:
+                print("  [会話終了] 待機モードへ戻ります")
+                time.sleep(1)
+                self._switch_to(RobotState.STANDBY)
+                return
+
     # ── 状態遷移 ──────────────────────────────────────────────
 
     def _switch_to(self, new_state: RobotState) -> None:
         self._stop_event.set()
+        self._is_listening = False   # listen()がブロック中でもインジケーターを即消す
         self._video_generation += 1  # 動画プレーヤースレッドを確実に停止
         if (self._current_thread and self._current_thread.is_alive()
                 and self._current_thread != threading.current_thread()):
@@ -675,6 +802,9 @@ class EntranceRobot:
         scaled_map = pygame.transform.scale(map_surf, (mw, mh))
         self.screen.blit(scaled_map, (map_x, map_y))
 
+        # 吹き出し（待ち時間 / 整理券不要）
+        self._draw_congestion_bubbles(map_x, map_y, mw, mh)
+
         # 右半分: 動画 or 写真
         if right_surf is not None:
             scale_r = min(half_w / right_surf.get_width(), content_h / right_surf.get_height())
@@ -682,6 +812,18 @@ class EntranceRobot:
             rh = int(right_surf.get_height() * scale_r)
             scaled_right = pygame.transform.scale(right_surf, (rw, rh))
             self.screen.blit(scaled_right, (half_w + half_w // 2 - rw // 2, content_h // 2 - rh // 2))
+
+        # パネルラベル（右パネルの上に重ねて表示）
+        if self.state == RobotState.STANDBY:
+            for text, cx in [("フロアマップ", half_w // 2), ("企画紹介動画", half_w + half_w // 2)]:
+                surf = self._label_font.render(text, True, (255, 255, 255))
+                tw, th = surf.get_size()
+                pad_x, pad_y = 12, 5
+                bg = pygame.Surface((tw + pad_x * 2, th + pad_y * 2), pygame.SRCALPHA)
+                bg.fill((0, 0, 0, 160))
+                bx = cx - (tw + pad_x * 2) // 2
+                self.screen.blit(bg, (bx, 6))
+                self.screen.blit(surf, (bx + pad_x, 6 + pad_y))
 
         # ハイライト丸アニメーション
         with self._surface_lock:
@@ -705,6 +847,33 @@ class EntranceRobot:
             r = int(base_r * pulse)
             pygame.draw.circle(self.screen, (255, 255, 255), (cx, cy), r + 5, 5)  # 白縁
             pygame.draw.circle(self.screen, (230, 30, 30), (cx, cy), r, 6)         # 赤丸
+
+        # マイク聞き取り中インジケーター
+        if self._is_listening:
+            t = time.time()
+            ix = sw // 2
+            iy = content_h // 2
+
+            # 半透明の暗いオーバーレイ
+            overlay = pygame.Surface((sw, content_h), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 160))
+            self.screen.blit(overlay, (0, 0))
+
+            # RMSに反応する外側の波紋
+            rms_ratio = min(self._mic_rms / 3000.0, 1.0)
+            ripple_r = int(90 + rms_ratio * 60 + math.sin(t * 8) * 8)
+            ripple_surf = pygame.Surface((sw, content_h), pygame.SRCALPHA)
+            pygame.draw.circle(ripple_surf, (80, 180, 255, 80), (ix, iy), ripple_r)
+            self.screen.blit(ripple_surf, (0, 0))
+
+            # メインの青い円
+            base_r = int(70 + rms_ratio * 40)
+            pygame.draw.circle(self.screen, (40, 130, 255), (ix, iy), base_r)
+            pygame.draw.circle(self.screen, (120, 200, 255), (ix, iy), base_r, 4)
+
+            # テキスト
+            label = self._listen_font.render("音声認識中...", True, (255, 255, 255))
+            self.screen.blit(label, (ix - label.get_width() // 2, iy + base_r + 20))
 
         self._draw_volume_bar()
 
