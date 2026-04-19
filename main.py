@@ -249,6 +249,7 @@ class EntranceRobot:
         self._farewell_wavs: list[str] = [self._presynth_wav(m) for m in FAREWELL_RESPONSES]
 
         self._resynth_lock = threading.Lock()  # 再合成の多重実行防止
+        self._subtitle: str = ""               # 字幕テキスト（対話モード中の発話内容）
 
         self._mic_rms: float = 0.0
         self._is_listening: bool = False
@@ -258,6 +259,7 @@ class EntranceRobot:
         self._bubble_font = self._load_jp_font(15)
         self._listen_font = self._load_jp_font(32)
         self._label_font = self._load_jp_font(22)
+        self._subtitle_font = self._load_jp_font(30, weight=7)
 
         self._congestion: dict = {}  # 混雑状況キャッシュ
         self._start_firebase_poller()
@@ -269,11 +271,13 @@ class EntranceRobot:
         t = time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}"
         print(f"  [{t}] {label}")
 
-    def _load_jp_font(self, size: int) -> pygame.font.Font:
-        for path in (
+    def _load_jp_font(self, size: int, weight: int = 3) -> pygame.font.Font:
+        candidates = (
+            f"/System/Library/Fonts/ヒラギノ角ゴシック W{weight}.ttc",
             "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
             "/System/Library/Fonts/Hiragino Sans GB.ttc",
-        ):
+        )
+        for path in candidates:
             try:
                 return pygame.font.Font(path, size)
             except Exception:
@@ -532,6 +536,8 @@ class EntranceRobot:
                     pa.terminate()
             threading.Thread(target=_mic_monitor, daemon=True).start()
 
+        if self.state == RobotState.INTERACTION:
+            self._subtitle = text
         pygame.mixer.music.load(tmp_path)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
@@ -539,6 +545,7 @@ class EntranceRobot:
                 pygame.mixer.music.stop()
                 break
             time.sleep(0.05)
+        self._subtitle = ""
         os.unlink(tmp_path)
         return not interrupted.is_set()
 
@@ -746,13 +753,16 @@ class EntranceRobot:
         # 右パネルをクリア（動画停止後）
         with self._surface_lock:
             self._right_surface = None
+        self._subtitle = "こんにちは！何かご質問はありますか？"
         pygame.mixer.music.load(self._greeting_wav)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
             if self._stop_event.is_set():
                 pygame.mixer.music.stop()
+                self._subtitle = ""
                 return
             time.sleep(0.05)
+        self._subtitle = ""
         history: list = []  # 対話モード中の会話履歴（モード終了で破棄）
         while not self._stop_event.is_set():
             user_input, timed_out = self.listen()
@@ -767,7 +777,10 @@ class EntranceRobot:
 
             # 別れの言葉はGeminiを介さず即座に返答して待機モードへ
             if any(kw in user_input for kw in FAREWELL_KEYWORDS):
-                wav = random.choice(self._farewell_wavs)
+                idx = random.randrange(len(FAREWELL_RESPONSES))
+                farewell_text = FAREWELL_RESPONSES[idx]
+                wav = self._farewell_wavs[idx]
+                self._subtitle = farewell_text
                 pygame.mixer.music.load(wav)
                 pygame.mixer.music.play()
                 while pygame.mixer.music.get_busy():
@@ -775,6 +788,7 @@ class EntranceRobot:
                         pygame.mixer.music.stop()
                         break
                     time.sleep(0.05)
+                self._subtitle = ""
                 time.sleep(1)
                 self._switch_to(RobotState.STANDBY)
                 return
@@ -815,6 +829,7 @@ class EntranceRobot:
             print(f"  [ロボット] {speech}")
             self._ts("発話 開始")
             # 合成済みWAVを直接再生
+            self._subtitle = speech
             pygame.mixer.music.load(wav_path)
             pygame.mixer.music.play()
             while pygame.mixer.music.get_busy():
@@ -822,6 +837,7 @@ class EntranceRobot:
                     pygame.mixer.music.stop()
                     break
                 time.sleep(0.05)
+            self._subtitle = ""
             os.unlink(wav_path)
 
             if not should_continue:
@@ -967,6 +983,24 @@ class EntranceRobot:
             # テキスト
             label = self._listen_font.render("音声認識中...", True, (255, 255, 255))
             self.screen.blit(label, (ix - label.get_width() // 2, iy + base_r + 20))
+
+        # 字幕（対話モード中の発話内容）
+        if self.state == RobotState.INTERACTION and self._subtitle:
+            # 40文字で折り返し
+            chars = self._subtitle
+            lines = [chars[i:i+40] for i in range(0, len(chars), 40)]
+            pad_x, pad_y, line_gap = 20, 10, 6
+            line_surfs = [self._subtitle_font.render(l, True, (255, 255, 255)) for l in lines]
+            box_w = max(s.get_width() for s in line_surfs) + pad_x * 2
+            line_h = line_surfs[0].get_height()
+            box_h = line_h * len(line_surfs) + line_gap * (len(line_surfs) - 1) + pad_y * 2
+            bx = sw // 2 - box_w // 2
+            by = sh - bar_h - box_h - 10
+            bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+            bg.fill((0, 0, 0, 180))
+            self.screen.blit(bg, (bx, by))
+            for i, s in enumerate(line_surfs):
+                self.screen.blit(s, (bx + pad_x, by + pad_y + i * (line_h + line_gap)))
 
         self._draw_volume_bar()
 
