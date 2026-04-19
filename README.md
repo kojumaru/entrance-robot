@@ -34,7 +34,7 @@ Google STT（音声認識）
     ↓
 Gemini API（回答・企画名を JSON で生成）← 混雑状況をプロンプトに注入
     ↓
-VOICEVOX（音声合成） → スピーカー出力
+gTTS（音声合成） → スピーカー出力
         ↓
     企画名が含まれる場合
         ↓
@@ -62,12 +62,17 @@ VOICEVOX（音声合成） → スピーカー出力
   - 右パネルに企画写真を表示
 - 8秒間無音が続くと自動的に待機モードへ復帰
 
-### モード切替
+### モード切替・操作キー
 
-| 操作                     | 動作                   |
-| ------------------------ | ---------------------- |
-| スペースキー             | 待機 ↔ 対話 の切り替え |
-| ESC / ウィンドウを閉じる | 終了                   |
+| キー                     | 動作                                         |
+| ------------------------ | -------------------------------------------- |
+| スペースキー             | 待機 ↔ 対話 の切り替え                       |
+| ↑ / ↓                   | 音声ピッチ +0.05 / -0.05（gTTS のみ）        |
+| → / ←                   | 読み上げ速度 +0.05 / -0.05（gTTS のみ）      |
+| T                        | 音声の tld を切り替え（com→co.jp→co.uk→…）  |
+| ESC / ウィンドウを閉じる | 終了                                         |
+
+ピッチ・速度・tld を変更すると全事前合成音声がバックグラウンドで自動再合成される。現在の値はコンソールに出力される。
 
 ---
 
@@ -151,7 +156,7 @@ if not person_detected and robot.state == RobotState.INTERACTION:
 
 ### 音声認識
 
-- **ライブラリ**: SpeechRecognition
+- **ライブラリ**: SpeechRecognition + PyAudio
 - **エンジン**: Google STT（無料・APIキー不要）
 - **言語**: 日本語 (ja-JP)
 - `MIC_THRESHOLD = 800` でマイク感度を調整（大きいほど鈍感）
@@ -171,14 +176,23 @@ if not person_detected and robot.state == RobotState.INTERACTION:
 ```
 
 - `exhibit` が返ってきた場合のみマップにハイライト表示
-- Gemini がひらがなを漢字に誤変換する場合は `EXHIBIT_ALIASES` で正規化
 
 ### 音声合成
 
-- **エンジン**: VOICEVOX Core（ローカル実行・オフライン動作）
-- **話者**: `VOICEVOX_SPEAKER = 8`（春日部つむぎ）
-- **再生**: pygame.mixer
+- **デフォルト**: gTTS（Google翻訳TTS）― 無料・要インターネット
+- **オプション**: VOICEVOX Core（ローカル実行・オフライン）― `--tts voicevox` で起動
+
+#### gTTS パラメータ（実行中にキーで調整可能）
+
+| パラメータ | 初期値 | 説明 |
+| ---------- | ------ | ---- |
+| `speed`    | 1.15   | 読み上げ速度（ffmpeg atempo） |
+| `pitch`    | 1.5    | ピッチ倍率（ffmpeg asetrate） |
+| `tld`      | com    | Googleドメイン（声質に影響） |
+
+- 発音修正は `WORD_FIXES` 辞書で単語単位に置換して対応
 - 呼び込みメッセージは**起動時に事前合成**してWAVキャッシュ → 動画再生を止めない
+- パラメータ変更時はバックグラウンドで全事前合成を再実行
 
 ### マップ表示
 
@@ -214,7 +228,7 @@ entrance_robot/
 │       └── {企画名}.jpg        # ファイル名 = 企画名と完全一致
 ├── movies/                    # 待機中に再生する動画
 │   └── *.mp4 / *.mov 等
-└── voicevox_core/             # VOICEVOX のモデル・辞書・ランタイム
+└── voicevox_core/             # VOICEVOXを使う場合のみ必要
     ├── onnxruntime/
     ├── dict/
     └── models/
@@ -224,19 +238,16 @@ entrance_robot/
 
 ## セットアップ
 
-### 1. 依存ライブラリのインストール
+### 1. システム依存ライブラリのインストール（macOS）
+
+```bash
+brew install portaudio ffmpeg
+```
+
+### 2. Python依存ライブラリのインストール
 
 ```bash
 pip install -r requirements.txt
-pip install "https://github.com/VOICEVOX/voicevox_core/releases/download/0.16.4/voicevox_core-0.16.4-cp310-abi3-macosx_11_0_arm64.whl"
-```
-
-### 2. VOICEVOX モデルのダウンロード（初回のみ）
-
-```bash
-curl -sSfL https://github.com/VOICEVOX/voicevox_core/releases/latest/download/download-osx-arm64 -o download
-chmod +x download
-./download --exclude c-api
 ```
 
 ### 3. 環境変数の設定
@@ -265,7 +276,17 @@ entrance_robot/
 ### 5. 起動
 
 ```bash
-python main.py
+python main.py              # gTTS（デフォルト）
+python main.py --tts voicevox  # VOICEVOX（要別途セットアップ）
+```
+
+### VOICEVOX を使う場合の追加セットアップ
+
+```bash
+pip install "https://github.com/VOICEVOX/voicevox_core/releases/download/0.16.4/voicevox_core-0.16.4-cp310-abi3-macosx_11_0_arm64.whl"
+curl -sSfL https://github.com/VOICEVOX/voicevox_core/releases/latest/download/download-osx-arm64 -o download
+chmod +x download
+./download --exclude c-api
 ```
 
 ---
@@ -307,6 +328,17 @@ STANDBY_MESSAGES = [
 ]
 ```
 
+### 発音修正の追加
+
+`main.py` の `GttsTTS.WORD_FIXES` を編集:
+
+```python
+WORD_FIXES: dict[str, str] = {
+    "工学": "こう学",
+    "単語": "読み方",
+}
+```
+
 ---
 
 ## パラメータ調整
@@ -317,7 +349,7 @@ STANDBY_MESSAGES = [
 | ------------------ | ------ | ---------------------------------------------------------------- |
 | `MIC_THRESHOLD`    | 800    | マイク感度（高いほど鈍感）。画面下部の音量バーで確認しながら調整 |
 | `LISTEN_TIMEOUT`   | 8      | 無音タイムアウト（秒）。この時間無音なら待機モードへ             |
-| `VOICEVOX_SPEAKER` | 8      | 話者ID（8: 春日部つむぎ、1: ずんだもん、3: ずんだもんあまあま）  |
+| `VOICEVOX_SPEAKER` | 3      | 話者ID（1: ずんだもん、3: ずんだもんあまあま）※voicevox使用時のみ |
 
 ---
 
@@ -327,14 +359,15 @@ STANDBY_MESSAGES = [
 メインスレッド          : pygame イベント処理・描画（30fps）
 ├─ 待機/対話スレッド    : モードロジック・音声合成・認識
 ├─ 動画再生スレッド     : OpenCV フレームデコード → キュー
-└─ 音量モニタースレッド : PyAudio でリアルタイム RMS 計測
+├─ 音量モニタースレッド : PyAudio でリアルタイム RMS 計測
+└─ 再合成スレッド       : TTS パラメータ変更時に事前合成を再実行
 ```
 
 ---
 
 ## 注意事項
 
-- VOICEVOXの音声を使用する際は「VOICEVOX:春日部つむぎ」のクレジット表記が必要
+- VOICEVOX の音声を使用する際は「VOICEVOX:ずんだもん」等のクレジット表記が必要
 - Gemini API は無料枠に制限あり。使い切ると 429/503 エラーが発生するが、自動でエラーメッセージを発話してリトライ待機する
-- インターネット接続が必要（Google STT・Gemini API）
+- インターネット接続が必要（Google STT・Gemini API・gTTS）
 - 音声認識は Google STT を使用（APIキー不要・無料）

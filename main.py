@@ -156,84 +156,46 @@ class VoicevoxTTS(TTSEngine):
         return f.name
 
 
-class SayTTS(TTSEngine):
-    """macOS 組み込み say コマンド（オフライン・低遅延）"""
-    VOICE = "Kyoko"  # 日本語音声
-
-    def synthesize(self, text: str) -> str:
-        f = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        f.close()
-        subprocess.run(
-            ["say", "-v", self.VOICE, "-o", f.name,
-             "--file-format=WAVE", "--data-format=LEI16@24000", text],
-            check=True
-        )
-        return f.name
-
 
 class GttsTTS(TTSEngine):
     """gTTS (Google翻訳TTS) — 無料・要インターネット"""
+    TLD_LIST = ["com", "co.jp", "co.uk", "com.au", "ca"]
+
+    # 発音調整用テキスト置換辞書
+    WORD_FIXES: dict[str, str] = {
+        "工学": "こう学",
+    }
+
+    def __init__(self):
+        self.speed = 1.1
+        self.pitch = 1.5
+        self._tld_index = 0
+
+    @property
+    def tld(self) -> str:
+        return self.TLD_LIST[self._tld_index]
+
+    def next_tld(self) -> str:
+        self._tld_index = (self._tld_index + 1) % len(self.TLD_LIST)
+        return self.tld
+
     def synthesize(self, text: str) -> str:
         from gtts import gTTS
+        for word, reading in self.WORD_FIXES.items():
+            text = text.replace(word, reading)
         mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
         mp3.close()
-        gTTS(text, lang="ja").save(mp3.name)
-        # afconvert (macOS) で WAV に変換
+        gTTS(text, lang="ja", tld=self.tld).save(mp3.name)
         wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         wav.close()
+        # atempo: 速度調整 / asetrate+aresample: ピッチ調整（速度に影響しない）
+        af = f"atempo={self.speed},asetrate=24000*{self.pitch},aresample=24000"
         subprocess.run(
-            ["afconvert", "-f", "WAVE", "-d", "LEI16@24000", mp3.name, wav.name],
-            check=True
-        )
-        os.unlink(mp3.name)
-        return wav.name
-
-
-class GoogleCloudTTS(TTSEngine):
-    """Google Cloud Text-to-Speech — 高品質・有料"""
-    def __init__(self):
-        from google.cloud import texttospeech
-        self._client = texttospeech.TextToSpeechClient()
-        self._voice = texttospeech.VoiceSelectionParams(
-            language_code="ja-JP", name="ja-JP-Neural2-B"
-        )
-        self._audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.LINEAR16,
-            sample_rate_hertz=24000,
-        )
-        print("  [Google Cloud TTS] 初期化完了")
-
-    def synthesize(self, text: str) -> str:
-        from google.cloud import texttospeech
-        response = self._client.synthesize_speech(
-            input=texttospeech.SynthesisInput(text=text),
-            voice=self._voice,
-            audio_config=self._audio_config,
-        )
-        f = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        f.write(response.audio_content); f.close()
-        return f.name
-
-
-class OpenAITTS(TTSEngine):
-    """OpenAI TTS — 高品質・有料"""
-    def __init__(self):
-        from openai import OpenAI
-        self._client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-        print("  [OpenAI TTS] 初期化完了")
-
-    def synthesize(self, text: str) -> str:
-        mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        mp3.close()
-        response = self._client.audio.speech.create(
-            model="tts-1", voice="nova", input=text
-        )
-        response.stream_to_file(mp3.name)
-        wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        wav.close()
-        subprocess.run(
-            ["afconvert", "-f", "WAVE", "-d", "LEI16@24000", mp3.name, wav.name],
-            check=True
+            ["ffmpeg", "-y", "-i", mp3.name,
+             "-filter:a", af,
+             "-ac", "1", "-sample_fmt", "s16",
+             wav.name],
+            check=True, capture_output=True
         )
         os.unlink(mp3.name)
         return wav.name
@@ -242,10 +204,7 @@ class OpenAITTS(TTSEngine):
 def create_tts_engine(name: str) -> TTSEngine:
     engines = {
         "voicevox": VoicevoxTTS,
-        "say":      SayTTS,
         "gtts":     GttsTTS,
-        "google":   GoogleCloudTTS,
-        "openai":   OpenAITTS,
     }
     cls = engines.get(name)
     if cls is None:
@@ -288,6 +247,8 @@ class EntranceRobot:
         self._thinking_channel = pygame.mixer.Channel(1)  # 専用チャンネル（GIL対策）
         self._thinking_loop_sound = self._make_thinking_loop_sound()  # 結合ループ音声
         self._farewell_wavs: list[str] = [self._presynth_wav(m) for m in FAREWELL_RESPONSES]
+
+        self._resynth_lock = threading.Lock()  # 再合成の多重実行防止
 
         self._mic_rms: float = 0.0
         self._is_listening: bool = False
@@ -436,6 +397,33 @@ class EntranceRobot:
         paths = [self._presynth_wav(msg) for msg in STANDBY_MESSAGES]
         print(f"  [事前合成] {len(paths)}件完了")
         return paths
+
+    def _resynth_all(self) -> None:
+        """音声パラメータ変更後に全事前合成音声を再生成する（バックグラウンド実行）"""
+        if not self._resynth_lock.acquire(blocking=False):
+            print("  [再合成] 既に実行中のためスキップ")
+            return
+
+        def _worker():
+            try:
+                print("  [再合成] 開始...")
+                standby = [self._presynth_wav(msg) for msg in STANDBY_MESSAGES]
+                greeting = self._presynth_wav("こんにちは！何かご質問はありますか？")
+                thinking = [self._presynth_wav(m) for m in THINKING_MESSAGES]
+                farewell = [self._presynth_wav(m) for m in FAREWELL_RESPONSES]
+                # thinking_loop_soundはSoundオブジェクトなのでwav差し替え後に再構築
+                self._thinking_wavs = thinking
+                loop_sound = self._make_thinking_loop_sound()
+                # アトミックに差し替え
+                self._standby_wavs = standby
+                self._greeting_wav = greeting
+                self._thinking_loop_sound = loop_sound
+                self._farewell_wavs = farewell
+                print("  [再合成] 完了")
+            finally:
+                self._resynth_lock.release()
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _draw_volume_bar(self) -> None:
         sw, sh = self.screen.get_size()
@@ -605,7 +593,7 @@ class EntranceRobot:
         try:
             self._ts("Gemini 開始")
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.5-flash-lite",
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=full_system,
@@ -1003,6 +991,23 @@ class EntranceRobot:
                         running = False
                     elif event.key == pygame.K_SPACE:
                         self.toggle()
+                    elif isinstance(self._tts, GttsTTS):
+                        changed = True
+                        if event.key == pygame.K_UP:
+                            self._tts.pitch = round(self._tts.pitch + 0.05, 2)
+                        elif event.key == pygame.K_DOWN:
+                            self._tts.pitch = round(max(0.5, self._tts.pitch - 0.05), 2)
+                        elif event.key == pygame.K_RIGHT:
+                            self._tts.speed = round(self._tts.speed + 0.05, 2)
+                        elif event.key == pygame.K_LEFT:
+                            self._tts.speed = round(max(0.5, self._tts.speed - 0.05), 2)
+                        elif event.key == pygame.K_t:
+                            self._tts.next_tld()
+                        else:
+                            changed = False
+                        if changed:
+                            print(f"  [TTS] speed={self._tts.speed}  pitch={self._tts.pitch}  tld={self._tts.tld}")
+                            self._resynth_all()
 
             self._render()
             pygame.display.flip()
@@ -1016,9 +1021,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="精密ラボ 受付ロボット")
     parser.add_argument(
         "--tts",
-        choices=["voicevox", "say", "gtts", "google", "openai"],
-        default="voicevox",
-        help="音声合成エンジン (default: voicevox)",
+        choices=["voicevox", "gtts"],
+        default="gtts",
+        help="音声合成エンジン (default: gtts)",
     )
     args = parser.parse_args()
     EntranceRobot(tts_name=args.tts).run()

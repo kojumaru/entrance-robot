@@ -1,4 +1,5 @@
 .env
+venv/
 voicevox_core/
 __pycache__/
 *.pyc
