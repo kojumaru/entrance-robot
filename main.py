@@ -23,6 +23,9 @@ import time
 from enum import Enum
 from pathlib import Path
 
+import argparse
+import subprocess
+
 import fitz  # PyMuPDF
 from google import genai
 from google.genai import types
@@ -31,7 +34,6 @@ import PIL.ImageDraw as PILImageDraw
 import PIL.ImageFont as PILImageFont
 import pygame
 import speech_recognition as sr
-from voicevox_core.blocking import Onnxruntime, OpenJtalk, Synthesizer, VoiceModelFile
 
 # ── 定数 ──────────────────────────────────────────────────────────────────────
 
@@ -119,6 +121,97 @@ EXHIBIT_LOCATIONS = {
 
 
 
+# ── TTS エンジン ──────────────────────────────────────────────────────────────
+
+class TTSEngine:
+    def synthesize(self, text: str) -> str:
+        """テキストを合成してWAVファイルパスを返す"""
+        raise NotImplementedError
+    def close(self): pass
+
+
+class VoicevoxTTS(TTSEngine):
+    def __init__(self):
+        from voicevox_core.blocking import Onnxruntime, OpenJtalk, Synthesizer, VoiceModelFile
+        import warnings; warnings.filterwarnings("ignore")
+        print("  [VOICEVOX] 初期化中...")
+        ort_path = _VOICEVOX_DIR / "onnxruntime" / "lib" / Onnxruntime.LIB_VERSIONED_FILENAME
+        ort = Onnxruntime.load_once(filename=str(ort_path))
+        dict_path = _VOICEVOX_DIR / "dict" / "open_jtalk_dic_utf_8-1.11"
+        self._synth = Synthesizer(
+            ort, OpenJtalk(dict_path),
+            acceleration_mode="CPU",
+            cpu_num_threads=max(multiprocessing.cpu_count() // 2, 1),
+        )
+        vvm_path = _VOICEVOX_DIR / "models" / "vvms" / "0.vvm"
+        with VoiceModelFile.open(vvm_path) as model:
+            self._synth.load_voice_model(model)
+        print("  [VOICEVOX] 初期化完了")
+
+    def synthesize(self, text: str) -> str:
+        query = self._synth.create_audio_query(text, VOICEVOX_SPEAKER)
+        wav = self._synth.synthesis(query, VOICEVOX_SPEAKER)
+        f = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        f.write(wav); f.close()
+        return f.name
+
+
+
+class GttsTTS(TTSEngine):
+    """gTTS (Google翻訳TTS) — 無料・要インターネット"""
+    TLD_LIST = ["com", "co.jp", "co.uk", "com.au", "ca"]
+
+    # 発音調整用テキスト置換辞書
+    WORD_FIXES: dict[str, str] = {
+        "工学": "こう学",
+    }
+
+    def __init__(self):
+        self.speed = 1.1
+        self.pitch = 1.5
+        self._tld_index = 0
+
+    @property
+    def tld(self) -> str:
+        return self.TLD_LIST[self._tld_index]
+
+    def next_tld(self) -> str:
+        self._tld_index = (self._tld_index + 1) % len(self.TLD_LIST)
+        return self.tld
+
+    def synthesize(self, text: str) -> str:
+        from gtts import gTTS
+        for word, reading in self.WORD_FIXES.items():
+            text = text.replace(word, reading)
+        mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        mp3.close()
+        gTTS(text, lang="ja", tld=self.tld).save(mp3.name)
+        wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        wav.close()
+        # atempo: 速度調整 / asetrate+aresample: ピッチ調整（速度に影響しない）
+        af = f"atempo={self.speed},asetrate=24000*{self.pitch},aresample=24000"
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", mp3.name,
+             "-filter:a", af,
+             "-ac", "1", "-sample_fmt", "s16",
+             wav.name],
+            check=True, capture_output=True
+        )
+        os.unlink(mp3.name)
+        return wav.name
+
+
+def create_tts_engine(name: str) -> TTSEngine:
+    engines = {
+        "voicevox": VoicevoxTTS,
+        "gtts":     GttsTTS,
+    }
+    cls = engines.get(name)
+    if cls is None:
+        raise ValueError(f"Unknown TTS engine: {name}")
+    return cls()
+
+
 class RobotState(Enum):
     STANDBY = "standby"
     INTERACTION = "interaction"
@@ -127,7 +220,7 @@ class RobotState(Enum):
 # ── ロボット本体 ───────────────────────────────────────────────────────────────
 
 class EntranceRobot:
-    def __init__(self) -> None:
+    def __init__(self, tts_name: str = "voicevox") -> None:
         self.client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         self.state = RobotState.STANDBY
         self._stop_event = threading.Event()
@@ -146,13 +239,16 @@ class EntranceRobot:
         self._right_surface: pygame.Surface | None = None
         self._highlight_loc: dict | None = None  # アニメーション用ハイライト座標
 
-        self.synthesizer = self._init_voicevox()
+        self._tts: TTSEngine = create_tts_engine(tts_name)
+        print(f"  [TTS] エンジン: {tts_name}")
         self._standby_wavs: list[str] = self._presynth_standby_messages()
         self._greeting_wav: str = self._presynth_wav("こんにちは！何かご質問はありますか？")
         self._thinking_wavs: list[str] = [self._presynth_wav(m) for m in THINKING_MESSAGES]
         self._thinking_channel = pygame.mixer.Channel(1)  # 専用チャンネル（GIL対策）
         self._thinking_loop_sound = self._make_thinking_loop_sound()  # 結合ループ音声
         self._farewell_wavs: list[str] = [self._presynth_wav(m) for m in FAREWELL_RESPONSES]
+
+        self._resynth_lock = threading.Lock()  # 再合成の多重実行防止
 
         self._mic_rms: float = 0.0
         self._is_listening: bool = False
@@ -165,26 +261,6 @@ class EntranceRobot:
 
         self._congestion: dict = {}  # 混雑状況キャッシュ
         self._start_firebase_poller()
-
-    # ── VOICEVOX 初期化 ───────────────────────────────────────
-
-    def _init_voicevox(self) -> Synthesizer:
-        import warnings; warnings.filterwarnings("ignore")
-        print("  [VOICEVOX] 初期化中...")
-        ort_path = _VOICEVOX_DIR / "onnxruntime" / "lib" / Onnxruntime.LIB_VERSIONED_FILENAME
-        ort = Onnxruntime.load_once(filename=str(ort_path))
-        dict_path = _VOICEVOX_DIR / "dict" / "open_jtalk_dic_utf_8-1.11"
-        synthesizer = Synthesizer(
-            ort,
-            OpenJtalk(dict_path),
-            acceleration_mode="CPU",
-            cpu_num_threads=max(multiprocessing.cpu_count() // 2, 1),
-        )
-        vvm_path = _VOICEVOX_DIR / "models" / "vvms" / "0.vvm"
-        with VoiceModelFile.open(vvm_path) as model:
-            synthesizer.load_voice_model(model)
-        print("  [VOICEVOX] 初期化完了")
-        return synthesizer
 
     # ── ユーティリティ ────────────────────────────────────────
 
@@ -292,12 +368,7 @@ class EntranceRobot:
     # ── 呼び込み音声の事前合成 ────────────────────────────────
 
     def _presynth_wav(self, text: str) -> str:
-        audio_query = self.synthesizer.create_audio_query(text, VOICEVOX_SPEAKER)
-        wav = self.synthesizer.synthesis(audio_query, VOICEVOX_SPEAKER)
-        f = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        f.write(wav)
-        f.close()
-        return f.name
+        return self._tts.synthesize(text)
 
     def _make_thinking_loop_sound(self) -> pygame.mixer.Sound:
         """ThinkingメッセージWAVを結合してループ再生用Soundを作成"""
@@ -326,6 +397,33 @@ class EntranceRobot:
         paths = [self._presynth_wav(msg) for msg in STANDBY_MESSAGES]
         print(f"  [事前合成] {len(paths)}件完了")
         return paths
+
+    def _resynth_all(self) -> None:
+        """音声パラメータ変更後に全事前合成音声を再生成する（バックグラウンド実行）"""
+        if not self._resynth_lock.acquire(blocking=False):
+            print("  [再合成] 既に実行中のためスキップ")
+            return
+
+        def _worker():
+            try:
+                print("  [再合成] 開始...")
+                standby = [self._presynth_wav(msg) for msg in STANDBY_MESSAGES]
+                greeting = self._presynth_wav("こんにちは！何かご質問はありますか？")
+                thinking = [self._presynth_wav(m) for m in THINKING_MESSAGES]
+                farewell = [self._presynth_wav(m) for m in FAREWELL_RESPONSES]
+                # thinking_loop_soundはSoundオブジェクトなのでwav差し替え後に再構築
+                self._thinking_wavs = thinking
+                loop_sound = self._make_thinking_loop_sound()
+                # アトミックに差し替え
+                self._standby_wavs = standby
+                self._greeting_wav = greeting
+                self._thinking_loop_sound = loop_sound
+                self._farewell_wavs = farewell
+                print("  [再合成] 完了")
+            finally:
+                self._resynth_lock.release()
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _draw_volume_bar(self) -> None:
         sw, sh = self.screen.get_size()
@@ -399,21 +497,16 @@ class EntranceRobot:
     def _get_response_wav(self, user_input: str, history: list):
         """Gemini回答生成 + VOICEVOX合成 + 画像読み込みをまとめて行う"""
         speech, exhibit, should_continue = self.get_response(user_input, history)
-        self._ts("VOICEVOX合成 開始")
+        self._ts("TTS合成 開始")
         wav_path = self._presynth_wav(speech)
-        self._ts("VOICEVOX合成 完了")
+        self._ts("TTS合成 完了")
         photo_pil = self._load_exhibit_photo(exhibit) if exhibit and EXHIBIT_LOCATIONS.get(exhibit) else None
         return wav_path, exhibit, speech, photo_pil, should_continue
 
     def speak(self, text: str, interruptible: bool = False) -> bool:
-        self._ts("VOICEVOX合成 開始")
-        audio_query = self.synthesizer.create_audio_query(text, VOICEVOX_SPEAKER)
-        wav = self.synthesizer.synthesis(audio_query, VOICEVOX_SPEAKER)
-        self._ts("VOICEVOX合成 完了")
-
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(wav)
-            tmp_path = f.name
+        self._ts("TTS合成 開始")
+        tmp_path = self._tts.synthesize(text)
+        self._ts("TTS合成 完了")
 
         interrupted = threading.Event()
 
@@ -500,7 +593,7 @@ class EntranceRobot:
         try:
             self._ts("Gemini 開始")
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.5-flash-lite",
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=full_system,
@@ -898,6 +991,23 @@ class EntranceRobot:
                         running = False
                     elif event.key == pygame.K_SPACE:
                         self.toggle()
+                    elif isinstance(self._tts, GttsTTS):
+                        changed = True
+                        if event.key == pygame.K_UP:
+                            self._tts.pitch = round(self._tts.pitch + 0.05, 2)
+                        elif event.key == pygame.K_DOWN:
+                            self._tts.pitch = round(max(0.5, self._tts.pitch - 0.05), 2)
+                        elif event.key == pygame.K_RIGHT:
+                            self._tts.speed = round(self._tts.speed + 0.05, 2)
+                        elif event.key == pygame.K_LEFT:
+                            self._tts.speed = round(max(0.5, self._tts.speed - 0.05), 2)
+                        elif event.key == pygame.K_t:
+                            self._tts.next_tld()
+                        else:
+                            changed = False
+                        if changed:
+                            print(f"  [TTS] speed={self._tts.speed}  pitch={self._tts.pitch}  tld={self._tts.tld}")
+                            self._resynth_all()
 
             self._render()
             pygame.display.flip()
@@ -908,4 +1018,12 @@ class EntranceRobot:
 
 
 if __name__ == "__main__":
-    EntranceRobot().run()
+    parser = argparse.ArgumentParser(description="精密ラボ 受付ロボット")
+    parser.add_argument(
+        "--tts",
+        choices=["voicevox", "gtts"],
+        default="gtts",
+        help="音声合成エンジン (default: gtts)",
+    )
+    args = parser.parse_args()
+    EntranceRobot(tts_name=args.tts).run()
