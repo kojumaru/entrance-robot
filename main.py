@@ -49,24 +49,23 @@ _FIREBASE_CREDENTIAL = Path(__file__).parent / "firebase_admin.json"
 # 企画key → 企画名マッピング（Geminiの出力・Firebase両方で使用）
 EXHIBIT_KEY_MAP = {
     # 3階
-    "soccer":   "ロボットサッカー",
-    "chess":    "ロボットチェス",
-    "arm":      "ワームホールロボットアーム",
-    "switch":   "せいみつスイッチ",
-    "dress":    "AI着替えカメラ",
-    "shooting": "お絵描きシューティング",
-    "media":    "メディアアート",
-    "space":    "自己投影空間",
-    "truck":    "トロッコVR",
-    # 1階
-    "pendulum": "スーパー倒立振子",
-    "tank":     "ARタンク",
-    "pong":     "せいみつPONG",
+    "jungle":   "ジャングル・スコープ",
+    "room": "現実拡張空間",
+    "media":    "精密メディアアート",
     "balloon":  "バルーンロボット",
+    "switch":   "せいみつスイッチ",
+    "arm":      "ロボットアーム",
+    "chess":    "ロボットチェス",
+    "soccer":   "スーパーロボットサッカー",
+    # 1階
+    "lab":      "AI精密ラボ",
     "connect4": "立体四目並べ",
-    "handwrite":"筆談ロボット",
+    "pong":     "せいみつPONG",
+    "shooting": "お絵描きシューティング",
+    "tank":     "ARタンク",
+    "balance":  "3軸制御バランスキューブ",
+    "dress":    "AI着せ替えカメラ",
     "janken":   "じゃんけんAI",
-    "reception":"受付ロボット",
 }
 FIREBASE_POLL_INTERVAL = 30  # 混雑状況の更新間隔（秒）
 QUEUE_BUFFER_MINUTES = 10   # 番号呼び出し後に列に並ぶまでの目安時間（分）
@@ -97,26 +96,27 @@ DISPLAY_WIDTH = 1200
 DISPLAY_HEIGHT = 700
 
 # ── 企画場所の座標（マップ画像全体を1.0とした相対座標）────────────────────────
+# x,y  : ハイライト丸の中心（マップ全体を1.0とした相対座標）
+# bx,by : 吹き出し矢印の先端（省略時は x,y を使用）
 EXHIBIT_LOCATIONS = {
     # 3階
-    "ロボットサッカー":           {"x": 0.13, "y": 0.14},
-    "ロボットチェス":             {"x": 0.27, "y": 0.14},
-    "ワームホールロボットアーム":   {"x": 0.40, "y": 0.14},
-    "せいみつスイッチ":           {"x": 0.52, "y": 0.14},
-    "AI着替えカメラ":             {"x": 0.62, "y": 0.13},
-    "お絵描きシューティング":      {"x": 0.7, "y": 0.13},
-    "メディアアート":             {"x": 0.13, "y": 0.36},
-    "自己投影空間":               {"x": 0.64, "y": 0.3},
-    "トロッコVR":                 {"x": 0.64, "y": 0.39},
+    "ジャングル・スコープ":              {"x": 0.3930, "y": 0.0860, "bx": 0.3630, "by": 0.0640},
+    "現実拡張空間":                  {"x": 0.5390, "y": 0.0980, "bx": 0.5030, "by": 0.0670},
+    "精密メディアアート":               {"x": 0.9210, "y": 0.0950, "bx": 0.9540, "by": 0.0700},
+    "バルーンロボット":                {"x": 0.3240, "y": 0.3350, "bx": 0.3000, "by": 0.2820},
+    "せいみつスイッチ":                {"x": 0.5090, "y": 0.3530, "bx": 0.4940, "by": 0.2790},
+    "ロボットアーム":                 {"x": 0.6510, "y": 0.3500, "bx": 0.6330, "by": 0.2730},
+    "ロボットチェス":                 {"x": 0.7890, "y": 0.3470, "bx": 0.7680, "by": 0.2730},
+    "スーパーロボットサッカー":            {"x": 0.9220, "y": 0.3410, "bx": 0.8980, "by": 0.2760},
     # 1階
-    "スーパー倒立振子":           {"x": 0.27, "y": 0.7},
-    "ARタンク":                  {"x": 0.35, "y": 0.73},
-    "せいみつPONG":              {"x": 0.35, "y": 0.81},
-    "バルーンロボット":           {"x": 0.15, "y": 0.82},
-    "立体四目並べ":               {"x": 0.45, "y": 0.82},
-    "筆談ロボット":               {"x": 0.55, "y": 0.76},
-    "じゃんけんAI":              {"x": 0.78, "y": 0.7},
-    "受付ロボット":               {"x": 0.9, "y": 0.7},
+    "AI精密ラボ":                  {"x": 0.3100, "y": 0.6260, "bx": 0.2950, "by": 0.5790},
+    "立体四目並べ":                  {"x": 0.4250, "y": 0.6290, "bx": 0.4190, "by": 0.5700},
+    "せいみつPONG":                {"x": 0.5580, "y": 0.6290, "bx": 0.5490, "by": 0.5580},
+    "お絵描きシューティング":             {"x": 0.8560, "y": 0.6170, "bx": 0.8470, "by": 0.5550},
+    "ARタンク":                   {"x": 0.5590, "y": 0.8500, "bx": 0.5440, "by": 0.7820},
+    "3軸制御バランスキューブ":            {"x": 0.7020, "y": 0.8290, "bx": 0.6900, "by": 0.7700},
+    "AI着せ替えカメラ":               {"x": 0.8570, "y": 0.8380, "bx": 0.8720, "by": 0.7820},
+    "じゃんけんAI":                 {"x": 0.1360, "y": 0.8530, "bx": 0.1120, "by": 0.7820},
 }
 
 
@@ -291,15 +291,10 @@ class EntranceRobot:
     # ── マップ読み込み ────────────────────────────────────────
 
     def _load_map_images(self) -> list:
-        pdf_path = os.path.join(os.path.dirname(__file__), "assets", "企画場所.pdf")
-        doc = fitz.open(pdf_path)
-        images = []
-        for page in doc:
-            pix = page.get_pixmap(dpi=150)
-            img = PILImage.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            images.append(img)
-        print(f"  [マップ] {len(images)}ページ読み込み完了")
-        return images
+        png_path = os.path.join(os.path.dirname(__file__), "案内図", "館内図（吹き出しなし）.png")
+        img = PILImage.open(png_path).convert("RGB")
+        print(f"  [マップ] PNG読み込み完了")
+        return [img]
 
     # ── Firebase 混雑状況ポーリング ───────────────────────────
 
@@ -645,15 +640,11 @@ class EntranceRobot:
 
     def _draw_congestion_bubbles(self, map_x: int, map_y: int, mw: int, mh: int) -> None:
         """マップ上の各企画に待ち時間吹き出しを描画する"""
-        queue_exhibits = set(EXHIBIT_KEY_MAP[k] for k in ("soccer","chess","arm","switch","shooting","space","truck","tank","pong"))
-
-        no_bubble_exhibits = {"受付ロボット"}
+        queue_exhibits = set(EXHIBIT_KEY_MAP[k] for k in ("jungle","ar_space","switch","arm","chess","soccer","pong","shooting","tank"))
 
         for exhibit, loc in EXHIBIT_LOCATIONS.items():
-            if exhibit in no_bubble_exhibits:
-                continue
-            cx = map_x + int(loc["x"] * mw)
-            cy = map_y + int(loc["y"] * mh)
+            bx = map_x + int(loc.get("bx", loc["x"]) * mw)
+            by = map_y + int(loc.get("by", loc["y"]) * mh)
 
             if exhibit in self._congestion:
                 info = self._congestion[exhibit]
@@ -674,7 +665,7 @@ class EntranceRobot:
                 text = "整理券不要"
                 bg = (80, 100, 160)
 
-            self._draw_bubble(text, cx, cy, bg)
+            self._draw_bubble(text, bx, by, bg)
 
     def _draw_bubble(self, text: str, cx: int, cy: int, bg: tuple) -> None:
         font = self._bubble_font
