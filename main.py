@@ -49,7 +49,7 @@ _FIREBASE_CREDENTIAL = Path(__file__).parent / "firebase_admin.json"
 # 企画key → 企画名マッピング（Geminiの出力・Firebase両方で使用）
 EXHIBIT_KEY_MAP = {
     # 3階
-    "jungle":   "ジャングル・スコープ",
+    "truck":    "ジャングル・スコープ",
     "room": "現実拡張空間",
     "media":    "精密メディアアート",
     "balloon":  "バルーンロボット",
@@ -100,9 +100,9 @@ DISPLAY_HEIGHT = 700
 # bx,by : 吹き出し矢印の先端（省略時は x,y を使用）
 EXHIBIT_LOCATIONS = {
     # 3階
-    "ジャングル・スコープ":              {"x": 0.3930, "y": 0.0860, "bx": 0.3630, "by": 0.0640},
-    "現実拡張空間":                  {"x": 0.5390, "y": 0.0980, "bx": 0.5030, "by": 0.0670},
-    "精密メディアアート":               {"x": 0.9210, "y": 0.0950, "bx": 0.9540, "by": 0.0700},
+    "ジャングル・スコープ":              {"x": 0.3930, "y": 0.0860, "bx": 0.3810, "by": 0.0160},
+    "現実拡張空間":                  {"x": 0.5390, "y": 0.0980, "bx": 0.5270, "by": 0.0190},
+    "精密メディアアート":               {"x": 0.9210, "y": 0.0950, "bx": 0.9180, "by": 0.0100},
     "バルーンロボット":                {"x": 0.3240, "y": 0.3350, "bx": 0.3000, "by": 0.2820},
     "せいみつスイッチ":                {"x": 0.5090, "y": 0.3530, "bx": 0.4940, "by": 0.2790},
     "ロボットアーム":                 {"x": 0.6510, "y": 0.3500, "bx": 0.6330, "by": 0.2730},
@@ -110,12 +110,12 @@ EXHIBIT_LOCATIONS = {
     "スーパーロボットサッカー":            {"x": 0.9220, "y": 0.3410, "bx": 0.8980, "by": 0.2760},
     # 1階
     "AI精密ラボ":                  {"x": 0.3100, "y": 0.6260, "bx": 0.2950, "by": 0.5790},
-    "立体四目並べ":                  {"x": 0.4250, "y": 0.6290, "bx": 0.4190, "by": 0.5700},
-    "せいみつPONG":                {"x": 0.5580, "y": 0.6290, "bx": 0.5490, "by": 0.5580},
+    "立体四目並べ":                  {"x": 0.4250, "y": 0.6290, "bx": 0.4280, "by": 0.5670},
+    "せいみつPONG":                {"x": 0.5580, "y": 0.6290, "bx": 0.5760, "by": 0.5760},
     "お絵描きシューティング":             {"x": 0.8560, "y": 0.6170, "bx": 0.8470, "by": 0.5550},
     "ARタンク":                   {"x": 0.5590, "y": 0.8500, "bx": 0.5440, "by": 0.7820},
     "3軸制御バランスキューブ":            {"x": 0.7020, "y": 0.8290, "bx": 0.6900, "by": 0.7700},
-    "AI着せ替えカメラ":               {"x": 0.8570, "y": 0.8380, "bx": 0.8720, "by": 0.7820},
+    "AI着せ替えカメラ":               {"x": 0.8570, "y": 0.8380, "bx": 0.8780, "by": 0.7850},
     "じゃんけんAI":                 {"x": 0.1360, "y": 0.8530, "bx": 0.1120, "by": 0.7820},
 }
 
@@ -256,7 +256,7 @@ class EntranceRobot:
         self._video_generation: int = 0
         self._video_frame_queue: queue.Queue = queue.Queue(maxsize=2)
         self._start_volume_monitor()
-        self._bubble_font = self._load_jp_font(15)
+        self._bubble_font_main = self._load_jp_font(14, weight=6)
         self._listen_font = self._load_jp_font(32)
         self._label_font = self._load_jp_font(22)
         self._subtitle_font = self._load_jp_font(30, weight=7)
@@ -640,7 +640,7 @@ class EntranceRobot:
 
     def _draw_congestion_bubbles(self, map_x: int, map_y: int, mw: int, mh: int) -> None:
         """マップ上の各企画に待ち時間吹き出しを描画する"""
-        queue_exhibits = set(EXHIBIT_KEY_MAP[k] for k in ("jungle","room","switch","arm","chess","soccer","pong","shooting","tank") if k in EXHIBIT_KEY_MAP)
+        queue_exhibits = set(EXHIBIT_KEY_MAP[k] for k in ("truck","room","switch","arm","chess","soccer","pong","shooting","tank") if k in EXHIBIT_KEY_MAP)
 
         for exhibit, loc in EXHIBIT_LOCATIONS.items():
             bx = map_x + int(loc.get("bx", loc["x"]) * mw)
@@ -652,42 +652,61 @@ class EntranceRobot:
                 minutes = info["minutes"]
                 if waiting == 0:
                     text = "10分以内"
-                    bg = (30, 180, 80)
+                    color = (20, 150, 65)
                 elif minutes <= 10:
-                    text = f"約{minutes}分"
-                    bg = (210, 170, 0)
+                    text = f"{minutes}分待ち"
+                    color = (190, 120, 0)
                 else:
-                    text = f"約{minutes}分"
-                    bg = (200, 60, 40)
+                    text = f"{minutes}分待ち"
+                    color = (180, 30, 50)
             elif exhibit in queue_exhibits:
                 continue  # Firebase接続前は表示しない
             else:
                 text = "整理券不要"
-                bg = (80, 100, 160)
+                color = (60, 90, 160)
 
-            self._draw_bubble(text, bx, by, bg)
+            self._draw_bubble(text, bx, by, color)
 
-    def _draw_bubble(self, text: str, cx: int, cy: int, bg: tuple) -> None:
-        font = self._bubble_font
-        text_surf = font.render(text, True, (255, 255, 255))
+    def _draw_bubble(self, text: str, cx: int, cy: int, color: tuple) -> None:
+        stroke = 2
+        pad_x, pad_y = 7, 5
+        arrow_w = 8
+        arrow_h = 8
+        r_outer = 10
+        r_inner = r_outer - stroke
+
+        text_surf = self._bubble_font_main.render(text, True, color)
         tw, th = text_surf.get_size()
-        pad_x, pad_y = 6, 3
-        bw = tw + pad_x * 2
-        bh = th + pad_y * 2
-        arrow_h = 6
 
-        bx = cx - bw // 2
-        by = cy - bh - arrow_h - 2
+        inner_w = tw + pad_x * 2
+        inner_h = th + pad_y * 2
+        outer_w = inner_w + stroke * 2
+        outer_h = inner_h + stroke * 2
+        total_h = outer_h + arrow_h
 
-        surf = pygame.Surface((bw, bh + arrow_h), pygame.SRCALPHA)
-        pygame.draw.rect(surf, (*bg, 210), (0, 0, bw, bh), border_radius=5)
-        pygame.draw.polygon(surf, (*bg, 210), [
-            (bw // 2 - 5, bh),
-            (bw // 2 + 5, bh),
-            (bw // 2,     bh + arrow_h),
+        surf = pygame.Surface((outer_w, total_h), pygame.SRCALPHA)
+        mid = outer_w // 2
+
+        # 枠（ボーダー色）
+        pygame.draw.rect(surf, (*color, 220), (0, 0, outer_w, outer_h), border_radius=r_outer)
+        pygame.draw.polygon(surf, (*color, 220), [
+            (mid - arrow_w, outer_h - 2),
+            (mid + arrow_w, outer_h - 2),
+            (mid, total_h),
         ])
-        self.screen.blit(surf, (bx, by))
-        self.screen.blit(text_surf, (bx + pad_x, by + pad_y))
+
+        # 内側（白）—— 三角の底辺を内側矩形の中にめり込ませて境目の線を消す
+        pygame.draw.rect(surf, (255, 255, 255, 248), (stroke, stroke, inner_w, inner_h), border_radius=r_inner)
+        pygame.draw.polygon(surf, (255, 255, 255, 248), [
+            (mid - arrow_w + stroke, outer_h - stroke - 1),
+            (mid + arrow_w - stroke, outer_h - stroke - 1),
+            (mid, total_h - stroke),
+        ])
+
+        # テキスト
+        surf.blit(text_surf, (stroke + pad_x, stroke + pad_y))
+
+        self.screen.blit(surf, (cx - outer_w // 2, cy - total_h))
 
     # ── マップ表示 ────────────────────────────────────────────
 
