@@ -897,52 +897,22 @@ class EntranceRobot:
         bar_h = 28
         content_h = sh - bar_h
 
-        # 動画フレームをメインスレッドでサーフェスに変換
-        try:
-            frame_rgb = self._video_frame_queue.get_nowait()
-            with self._surface_lock:
-                self._right_surface = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
-        except queue.Empty:
-            pass
-
         with self._surface_lock:
             map_surf = self._map_surface
-            right_surf = self._right_surface
 
         self.screen.fill((20, 20, 20))
-        half_w = sw // 2
 
-        # 左半分: マップ（常に画面の半分）
-        scale_m = min(half_w / map_surf.get_width(), content_h / map_surf.get_height())
+        # マップを全画面に拡張
+        scale_m = min(sw / map_surf.get_width(), content_h / map_surf.get_height())
         mw = int(map_surf.get_width() * scale_m)
         mh = int(map_surf.get_height() * scale_m)
-        map_x = half_w // 2 - mw // 2
+        map_x = sw // 2 - mw // 2
         map_y = content_h // 2 - mh // 2
         scaled_map = pygame.transform.scale(map_surf, (mw, mh))
         self.screen.blit(scaled_map, (map_x, map_y))
 
         # 吹き出し（待ち時間 / 整理券不要）
         self._draw_congestion_bubbles(map_x, map_y, mw, mh)
-
-        # 右半分: 動画 or 写真
-        if right_surf is not None:
-            scale_r = min(half_w / right_surf.get_width(), content_h / right_surf.get_height())
-            rw = int(right_surf.get_width() * scale_r)
-            rh = int(right_surf.get_height() * scale_r)
-            scaled_right = pygame.transform.scale(right_surf, (rw, rh))
-            self.screen.blit(scaled_right, (half_w + half_w // 2 - rw // 2, content_h // 2 - rh // 2))
-
-        # パネルラベル（右パネルの上に重ねて表示）
-        if self.state == RobotState.STANDBY:
-            for text, cx in [("フロアマップ", half_w // 2), ("企画紹介動画", half_w + half_w // 2)]:
-                surf = self._label_font.render(text, True, (255, 255, 255))
-                tw, th = surf.get_size()
-                pad_x, pad_y = 12, 5
-                bg = pygame.Surface((tw + pad_x * 2, th + pad_y * 2), pygame.SRCALPHA)
-                bg.fill((0, 0, 0, 160))
-                bx = cx - (tw + pad_x * 2) // 2
-                self.screen.blit(bg, (bx, 6))
-                self.screen.blit(surf, (bx + pad_x, 6 + pad_y))
 
         # ハイライト丸アニメーション
         with self._surface_lock:
