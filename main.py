@@ -640,7 +640,7 @@ class EntranceRobot:
 
     def _draw_congestion_bubbles(self, map_x: int, map_y: int, mw: int, mh: int) -> None:
         """マップ上の各企画に待ち時間吹き出しを描画する"""
-        queue_exhibits = set(EXHIBIT_KEY_MAP[k] for k in ("jungle","ar_space","switch","arm","chess","soccer","pong","shooting","tank"))
+        queue_exhibits = set(EXHIBIT_KEY_MAP[k] for k in ("jungle","room","switch","arm","chess","soccer","pong","shooting","tank") if k in EXHIBIT_KEY_MAP)
 
         for exhibit, loc in EXHIBIT_LOCATIONS.items():
             bx = map_x + int(loc.get("bx", loc["x"]) * mw)
