@@ -100,31 +100,103 @@ DISPLAY_HEIGHT = 700
 # bx,by : 吹き出し矢印の先端（省略時は x,y を使用）
 EXHIBIT_LOCATIONS = {
     # 3階
-    "ジャングル・スコープ":              {"x": 0.3930, "y": 0.0860, "bx": 0.3630, "by": 0.0640},
-    "現実拡張空間":                  {"x": 0.5390, "y": 0.0980, "bx": 0.5030, "by": 0.0670},
-    "精密メディアアート":               {"x": 0.9210, "y": 0.0950, "bx": 0.9540, "by": 0.0700},
-    "バルーンロボット":                {"x": 0.3240, "y": 0.3350, "bx": 0.3000, "by": 0.2820},
-    "せいみつスイッチ":                {"x": 0.5090, "y": 0.3530, "bx": 0.4940, "by": 0.2790},
-    "ロボットアーム":                 {"x": 0.6510, "y": 0.3500, "bx": 0.6330, "by": 0.2730},
-    "ロボットチェス":                 {"x": 0.7890, "y": 0.3470, "bx": 0.7680, "by": 0.2730},
-    "スーパーロボットサッカー":            {"x": 0.9220, "y": 0.3410, "bx": 0.8980, "by": 0.2760},
+    "ジャングル・スコープ":                {"x": 0.3930, "y": 0.0860, "bx": 0.3630, "by": 0.0640},
+    "現実拡張空間":                    {"x": 0.5390, "y": 0.0980, "bx": 0.5030, "by": 0.0670},
+    "精密メディアアート":                 {"x": 0.9210, "y": 0.0950, "bx": 0.9540, "by": 0.0700},
+    "バルーンロボット":                  {"x": 0.3240, "y": 0.3350, "bx": 0.3000, "by": 0.2820},
+    "せいみつスイッチ":                  {"x": 0.5090, "y": 0.3530, "bx": 0.4940, "by": 0.2790},
+    "ロボットアーム":                   {"x": 0.6510, "y": 0.3500, "bx": 0.6330, "by": 0.2730},
+    "ロボットチェス":                   {"x": 0.7890, "y": 0.3470, "bx": 0.7680, "by": 0.2730},
+    "スーパーロボットサッカー":              {"x": 0.9220, "y": 0.3410, "bx": 0.8980, "by": 0.2760},
     # 1階
-    "AI精密ラボ":                  {"x": 0.3100, "y": 0.6260, "bx": 0.2950, "by": 0.5790},
-    "立体四目並べ":                  {"x": 0.4250, "y": 0.6290, "bx": 0.4190, "by": 0.5700},
-    "せいみつPONG":                {"x": 0.5580, "y": 0.6290, "bx": 0.5490, "by": 0.5580},
-    "お絵描きシューティング":             {"x": 0.8560, "y": 0.6170, "bx": 0.8470, "by": 0.5550},
-    "ARタンク":                   {"x": 0.5590, "y": 0.8500, "bx": 0.5440, "by": 0.7820},
-    "3軸制御バランスキューブ":            {"x": 0.7020, "y": 0.8290, "bx": 0.6900, "by": 0.7700},
-    "AI着せ替えカメラ":               {"x": 0.8570, "y": 0.8380, "bx": 0.8720, "by": 0.7820},
-    "じゃんけんAI":                 {"x": 0.1360, "y": 0.8530, "bx": 0.1120, "by": 0.7820},
+    "AI精密ラボ":                    {"x": 0.3100, "y": 0.6260, "bx": 0.2950, "by": 0.5790},
+    "立体四目並べ":                    {"x": 0.4250, "y": 0.6290, "bx": 0.4190, "by": 0.5700},
+    "せいみつPONG":                  {"x": 0.5580, "y": 0.6290, "bx": 0.5490, "by": 0.5580},
+    "お絵描きシューティング":               {"x": 0.8560, "y": 0.6170, "bx": 0.8470, "by": 0.5550},
+    "ARタンク":                     {"x": 0.5590, "y": 0.8500, "bx": 0.5440, "by": 0.7820},
+    "3軸制御バランスキューブ":              {"x": 0.7020, "y": 0.8290, "bx": 0.6900, "by": 0.7700},
+    "AI着せ替えカメラ":                 {"x": 0.8570, "y": 0.8380, "bx": 0.8720, "by": 0.7820},
+    "じゃんけんAI":                   {"x": 0.1360, "y": 0.8530, "bx": 0.1120, "by": 0.7820},
 }
 
+# 建物key → 建物名（Geminiの出力・全体マップ表示で使用）
+BUILDING_NAME_MAP = {
+    "central":  "セントラルステージ",
+    "library":  "図書館広場",
+    "yasuda":   "安田講堂",
+    "eng1":     "工学部1号館",
+    "eng2":     "工学部2号館",
+    "eng3":     "工学部3号館",
+    "eng4":     "工学部4号館",
+    "eng5":     "工学部5号館",
+    "eng6":     "工学部6号館",
+    "eng7":     "工学部7号館",
+    "eng8":     "工学部8号館",
+    "eng11":    "工学部11号館",
+    "eng14":    "工学部14号館",
+    "eng_plaza":"工学部広場",
+    "food":     "フードサイエンス棟",
+    "agr1":     "農学部1号館",
+    "agr2":     "農学部2号館",
+    "agr3":     "農学部3号館",
+    "yayoi":    "弥生講堂",
+    "law1":     "法文1号館",
+    "law2":        "法文2号館",
+    "rikagaku1":   "理学部1号館",
+    "second_cafe": "第二食堂",
+    "akamon":      "赤門総合研究棟",
+    "econ":        "経済学研究科棟",
+    "intl":        "国際学術統合研究棟",
+    "pharm":       "薬学部棟",
+    "edu":         "教育学部棟",
+    "med2":        "医学部2号館本館",
+    "ikutoku":     "育徳堂",
+    "shichi":      "七徳堂",
+}
+
+# 全体マップ上の建物座標（festival_map.png全体を1.0とした相対座標）
+BUILDING_LOCATIONS = {
+    "central":     {"x": 0.4830, "y": 0.5570},  # セントラルステージ
+    "library":     {"x": 0.5950, "y": 0.7790},  # 図書館広場
+    "yasuda":      {"x": 0.4840, "y": 0.5050},  # 安田講堂
+    "eng1":        {"x": 0.3340, "y": 0.7770},  # 工学部1号館
+    "eng2":        {"x": 0.3720, "y": 0.5470},  # 工学部2号館
+    "eng3":        {"x": 0.3690, "y": 0.4300},  # 工学部3号館
+    "eng4":        {"x": 0.2720, "y": 0.5380},  # 工学部4号館
+    "eng5":        {"x": 0.2700, "y": 0.7970},  # 工学部5号館
+    "eng6":        {"x": 0.3800, "y": 0.6500},  # 工学部6号館
+    "eng7":        {"x": 0.2420, "y": 0.6530},  # 工学部7号館
+    "eng8":        {"x": 0.3020, "y": 0.6570},  # 工学部8号館
+    "eng11":       {"x": 0.3880, "y": 0.8720},  # 工学部11号館
+    "eng14":       {"x": 0.3270, "y": 0.8680},  # 工学部14号館
+    "eng_plaza":   {"x": 0.3980, "y": 0.7790},  # 工学部広場
+    "food":        {"x": 0.0690, "y": 0.5110},  # フードサイエンス棟
+    "agr1":        {"x": 0.1300, "y": 0.7630},  # 農学部1号館
+    "agr2":        {"x": 0.0400, "y": 0.7580},  # 農学部2号館
+    "agr3":        {"x": 0.0900, "y": 0.6060},  # 農学部3号館
+    "yayoi":       {"x": 0.0520, "y": 0.8670},  # 弥生講堂
+    "law1":        {"x": 0.4450, "y": 0.6850},  # 法文1号館
+    "law2":        {"x": 0.5260, "y": 0.6960},  # 法文2号館
+    "rikagaku1":   {"x": 0.5600, "y": 0.4700},  # 理学部1号館（要調整）
+    "second_cafe": {"x": 0.4200, "y": 0.4600},  # 第二食堂（要調整）
+    "akamon":      {"x": 0.6600, "y": 0.7400},  # 赤門総合研究棟（要調整）
+    "econ":        {"x": 0.7100, "y": 0.5700},  # 経済学研究科棟（要調整）
+    "intl":        {"x": 0.7700, "y": 0.5700},  # 国際学術統合研究棟（要調整）
+    "pharm":       {"x": 0.7400, "y": 0.3500},  # 薬学部棟（要調整）
+    "edu":         {"x": 0.6200, "y": 0.7100},  # 教育学部棟（要調整）
+    "med2":        {"x": 0.6800, "y": 0.4500},  # 医学部2号館本館（要調整）
+    "ikutoku":     {"x": 0.5500, "y": 0.4700},  # 育徳堂（要調整）
+    "shichi":      {"x": 0.2000, "y": 0.5200},  # 七徳堂（要調整）
+}
+
+# Geminiが返す企画名のゆらぎを正規名に正規化
+EXHIBIT_ALIASES: dict[str, str] = {}
 
 
 # ── TTS エンジン ──────────────────────────────────────────────────────────────
 
 class TTSEngine:
-    def synthesize(self, text: str) -> str:
+    def synthesize(self, _text: str) -> str:
         """テキストを合成してWAVファイルパスを返す"""
         raise NotImplementedError
     def close(self): pass
@@ -167,7 +239,7 @@ class GttsTTS(TTSEngine):
     }
 
     def __init__(self):
-        self.speed = 1.1
+        self.speed = 1
         self.pitch = 1.5
         self._tld_index = 0
 
@@ -233,11 +305,17 @@ class EntranceRobot:
 
         self.map_images = self._load_map_images()
 
+        # 全体マップ（五月祭キャンパスマップ）
+        _festival_path = os.path.join(os.path.dirname(__file__), "assets", "festival_map.png")
+        self._festival_map_pil: PILImage.Image = PILImage.open(_festival_path).convert("RGB")
+        self._festival_map_surface: pygame.Surface = self._pil_to_surface(self._festival_map_pil)
+
         # 左右それぞれのサーフェスを管理
         self._surface_lock = threading.Lock()
         self._map_surface: pygame.Surface = self._pil_to_surface(self.map_images[0])
         self._right_surface: pygame.Surface | None = None
-        self._highlight_loc: dict | None = None  # アニメーション用ハイライト座標
+        self._highlight_loc: dict | None = None        # 精密ラボマップ上の企画ハイライト
+        self._building_highlight_loc: dict | None = None  # 全体マップ上の建物ハイライト
 
         self._tts: TTSEngine = create_tts_engine(tts_name)
         print(f"  [TTS] エンジン: {tts_name}")
@@ -250,6 +328,8 @@ class EntranceRobot:
 
         self._resynth_lock = threading.Lock()  # 再合成の多重実行防止
         self._subtitle: str = ""               # 字幕テキスト（対話モード中の発話内容）
+        self._typing_text: str = ""            # キーボード入力中のテキスト
+        self._text_input_queue: queue.Queue = queue.Queue()  # 確定した文字入力
 
         self._mic_rms: float = 0.0
         self._is_listening: bool = False
@@ -263,6 +343,8 @@ class EntranceRobot:
 
         self._congestion: dict = {}  # 混雑状況キャッシュ
         self._start_firebase_poller()
+
+        self._gemini_cache_name: str | None = self._init_gemini_cache()
 
     # ── ユーティリティ ────────────────────────────────────────
 
@@ -494,13 +576,13 @@ class EntranceRobot:
     # ── 音声合成 ──────────────────────────────────────────────
 
     def _get_response_wav(self, user_input: str, history: list):
-        """Gemini回答生成 + VOICEVOX合成 + 画像読み込みをまとめて行う"""
-        speech, exhibit, should_continue = self.get_response(user_input, history)
+        """Gemini回答生成 + TTS合成 + 画像読み込みをまとめて行う"""
+        speech, exhibit, building_key, should_continue = self.get_response(user_input, history)
         self._ts("TTS合成 開始")
         wav_path = self._presynth_wav(speech)
         self._ts("TTS合成 完了")
         photo_pil = self._load_exhibit_photo(exhibit) if exhibit and EXHIBIT_LOCATIONS.get(exhibit) else None
-        return wav_path, exhibit, speech, photo_pil, should_continue
+        return wav_path, exhibit, building_key, speech, photo_pil, should_continue
 
     def speak(self, text: str, interruptible: bool = False) -> bool:
         self._ts("TTS合成 開始")
@@ -578,41 +660,102 @@ class EntranceRobot:
             print(f"  [音声認識エラー] {e}")
             return None, False
 
+    def _listen_or_text(self) -> tuple[str | None, bool]:
+        """音声認識とキーボード入力を並行して待つ。どちらか先に来た方を返す"""
+        result: list = [None, False]
+        done = threading.Event()
+
+        def _voice():
+            text, timed_out = self.listen()
+            if not done.is_set():
+                result[0] = text
+                result[1] = timed_out
+                done.set()
+
+        threading.Thread(target=_voice, daemon=True).start()
+
+        while not done.is_set() and not self._stop_event.is_set():
+            try:
+                text = self._text_input_queue.get_nowait()
+                if not done.is_set():
+                    result[0] = text
+                    result[1] = False
+                    self._is_listening = False
+                    done.set()
+                break
+            except queue.Empty:
+                time.sleep(0.05)
+
+        return result[0], result[1]
+
     # ── LLM ──────────────────────────────────────────────────
 
-    def get_response(self, user_input: str, history: list) -> tuple[str, str | None]:
+    def _build_static_system_prompt(self) -> str:
         prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "system_prompt.txt")
         with open(prompt_path, encoding="utf-8") as f:
-            system_prompt = f.read()
+            return f.read()
 
-        # 混雑状況をsystem_instructionに付加
+    def _init_gemini_cache(self) -> str | None:
+        """起動時にシステムプロンプトをGeminiコンテキストキャッシュとして登録する（TTL 12h）"""
+        try:
+            system_text = self._build_static_system_prompt()
+            cache = self.client.caches.create(
+                model="gemini-2.5-flash-lite",
+                config=types.CreateCachedContentConfig(
+                    system_instruction=system_text,
+                    ttl="43200s",
+                ),
+            )
+            print(f"  [Gemini Cache] 作成完了: {cache.name}")
+            return cache.name
+        except Exception as e:
+            print(f"  [Gemini Cache] 作成失敗（キャッシュなしで続行）: {e}")
+            return None
+
+    def get_response(self, user_input: str, history: list) -> tuple[str, str | None, str | None, bool]:
         congestion_text = self._build_congestion_text()
-        full_system = system_prompt + (f"\n\n{congestion_text}" if congestion_text else "")
 
         contents = list(history)
-        contents.append({"role": "user", "parts": [{"text": user_input}]})
+        # 混雑状況は最初のユーザーメッセージの前に差し込む
+        first_text = user_input
+        if congestion_text and not history:
+            first_text = f"{congestion_text}\n\n{user_input}"
+        contents.append({"role": "user", "parts": [{"text": first_text}]})
 
         try:
             self._ts("Gemini 開始")
-            response = self.client.models.generate_content(
-                model="gemini-2.5-flash-lite",
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=full_system,
-                    response_mime_type="application/json"
-                ),
-            )
+            if self._gemini_cache_name:
+                response = self.client.models.generate_content(
+                    model="gemini-2.5-flash-lite",
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        cached_content=self._gemini_cache_name,
+                        response_mime_type="application/json",
+                    ),
+                )
+            else:
+                system_text = self._build_static_system_prompt()
+                full_system = system_text + (f"\n\n{congestion_text}" if congestion_text else "")
+                response = self.client.models.generate_content(
+                    model="gemini-2.5-flash-lite",
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=full_system,
+                        response_mime_type="application/json",
+                    ),
+                )
             self._ts("Gemini 完了")
             raw = response.text
             data = json.loads(raw)
             exhibit_key = data.get("exhibit") or None
             exhibit = EXHIBIT_KEY_MAP.get(exhibit_key) if exhibit_key else None
-            return data.get("speech", ""), exhibit, data.get("continue", True)
+            building_key = data.get("building") or None
+            return data.get("speech", ""), exhibit, building_key, data.get("continue", True)
         except json.JSONDecodeError:
-            return raw, None, True
+            return raw, None, None, True
         except Exception as e:
             print(f"  [Gemini エラー] {e}")
-            return "すみません、もう一度お願いします", None, True
+            return "すみません、もう一度お願いします", None, None, True
 
     # ── 企画写真 ──────────────────────────────────────────────
 
@@ -640,7 +783,7 @@ class EntranceRobot:
 
     def _draw_congestion_bubbles(self, map_x: int, map_y: int, mw: int, mh: int) -> None:
         """マップ上の各企画に待ち時間吹き出しを描画する"""
-        queue_exhibits = set(EXHIBIT_KEY_MAP[k] for k in ("jungle","ar_space","switch","arm","chess","soccer","pong","shooting","tank"))
+        queue_exhibits = set(EXHIBIT_KEY_MAP[k] for k in ("jungle","room","switch","arm","chess","soccer","pong","shooting","tank"))
 
         for exhibit, loc in EXHIBIT_LOCATIONS.items():
             bx = map_x + int(loc.get("bx", loc["x"]) * mw)
@@ -718,6 +861,7 @@ class EntranceRobot:
             self._map_surface = new_map
             self._right_surface = None
             self._highlight_loc = None
+            self._building_highlight_loc = None
         self._start_video_player()
 
         msg_index = 0
@@ -741,9 +885,10 @@ class EntranceRobot:
 
     def _interaction_loop(self) -> None:
         print("[対話モード] 開始")
-        # 右パネルをクリア（動画停止後）
+        # 右パネルに全体マップを表示して開始
         with self._surface_lock:
-            self._right_surface = None
+            self._right_surface = self._festival_map_surface
+            self._building_highlight_loc = None
         self._subtitle = "こんにちは！何かご質問はありますか？"
         pygame.mixer.music.load(self._greeting_wav)
         pygame.mixer.music.play()
@@ -756,14 +901,13 @@ class EntranceRobot:
         self._subtitle = ""
         history: list = []  # 対話モード中の会話履歴（モード終了で破棄）
         while not self._stop_event.is_set():
-            user_input, timed_out = self.listen()
+            user_input, timed_out = self._listen_or_text()
             if timed_out:
                 print("  [タイムアウト] 待機モードへ戻ります")
                 self._switch_to(RobotState.STANDBY)
                 return
             if user_input is None:
                 continue  # 聞き取れなかっただけ → 再度マイク待機
-            t_user_end = time.time()
             print(f"  [ユーザー] {user_input}")
 
             # 別れの言葉はGeminiを介さず即座に返答して待機モードへ
@@ -795,14 +939,15 @@ class EntranceRobot:
                         return
                     time.sleep(0.05)
                 self._thinking_channel.stop()
-                wav_path, exhibit, speech, photo_pil, should_continue = future.result()
+                wav_path, exhibit, building_key, speech, photo_pil, should_continue = future.result()
 
             # 会話履歴に追記（次回のGemini呼び出しに引き継ぐ）
             history.append({"role": "user",  "parts": [{"text": user_input}]})
-            history.append({"role": "model", "parts": [{"text": json.dumps({"speech": speech, "exhibit": exhibit}, ensure_ascii=False)}]})
+            history.append({"role": "model", "parts": [{"text": json.dumps({"speech": speech, "exhibit": exhibit, "building": building_key}, ensure_ascii=False)}]})
 
             # Surface変換はロックの外で行い、代入だけロック内で（render()のブロック防止）
             if exhibit and photo_pil:
+                # 精密ラボ企画を聞かれた → マップハイライト + 右パネルに企画写真
                 loc = EXHIBIT_LOCATIONS.get(exhibit)
                 new_map = self._pil_to_surface(self.map_images[0])
                 new_right = self._pil_to_surface(photo_pil)
@@ -810,13 +955,18 @@ class EntranceRobot:
                     self._map_surface = new_map
                     self._right_surface = new_right
                     self._highlight_loc = loc
+                    self._building_highlight_loc = None
             elif exhibit:
                 print(f"  [座標未登録] {exhibit}")
             else:
-                # 企画に無関係な質問 → 写真とマーカーをクリア
+                # 企画に無関係な質問 → 全体マップ表示 + 建物ハイライト
+                building_loc = BUILDING_LOCATIONS.get(building_key) if building_key else None
                 with self._surface_lock:
-                    self._right_surface = None
+                    self._right_surface = self._festival_map_surface
                     self._highlight_loc = None
+                    self._building_highlight_loc = building_loc
+                if building_key and not building_loc:
+                    print(f"  [建物座標未登録] {building_key}")
             print(f"  [ロボット] {speech}")
             self._ts("発話 開始")
             # 合成済みWAVを直接再生
@@ -854,6 +1004,7 @@ class EntranceRobot:
             except queue.Empty:
                 break
         self.state = new_state
+        self._typing_text = ""
         target = (
             self._standby_loop
             if new_state == RobotState.STANDBY
@@ -889,6 +1040,7 @@ class EntranceRobot:
         with self._surface_lock:
             map_surf = self._map_surface
             right_surf = self._right_surface
+            building_loc = self._building_highlight_loc
 
         self.screen.fill((20, 20, 20))
         half_w = sw // 2
@@ -905,13 +1057,36 @@ class EntranceRobot:
         # 吹き出し（待ち時間 / 整理券不要）
         self._draw_congestion_bubbles(map_x, map_y, mw, mh)
 
-        # 右半分: 動画 or 写真
+        # 右半分: 動画 or 写真 or 全体マップ
+        right_x = half_w + half_w // 2
+        right_y = content_h // 2
+        rw = rh = 0
         if right_surf is not None:
             scale_r = min(half_w / right_surf.get_width(), content_h / right_surf.get_height())
             rw = int(right_surf.get_width() * scale_r)
             rh = int(right_surf.get_height() * scale_r)
+            right_x = half_w + half_w // 2 - rw // 2
+            right_y = content_h // 2 - rh // 2
             scaled_right = pygame.transform.scale(right_surf, (rw, rh))
-            self.screen.blit(scaled_right, (half_w + half_w // 2 - rw // 2, content_h // 2 - rh // 2))
+            self.screen.blit(scaled_right, (right_x, right_y))
+
+        # 全体マップ上の建物ハイライト
+        if building_loc is not None and rw > 0 and rh > 0:
+            t = time.time()
+            pulse = math.sin(t * 4) * 0.25 + 1.0
+            ripple = (math.sin(t * 3) + 1) / 2
+            base_r = max(14, int(rw * 0.03))
+            bcx = right_x + int(building_loc["x"] * rw)
+            bcy = right_y + int(building_loc["y"] * rh)
+
+            ripple_surf = pygame.Surface((sw, content_h), pygame.SRCALPHA)
+            ripple_r = int(base_r * (1.2 + ripple * 0.8))
+            ripple_alpha = int(180 * (1 - ripple))
+            pygame.draw.circle(ripple_surf, (50, 150, 255, ripple_alpha), (bcx, bcy), ripple_r, 4)
+            self.screen.blit(ripple_surf, (0, 0))
+            r = int(base_r * pulse)
+            pygame.draw.circle(self.screen, (255, 255, 255), (bcx, bcy), r + 4, 4)
+            pygame.draw.circle(self.screen, (30, 100, 230), (bcx, bcy), r, 5)
 
         # パネルラベル（右パネルの上に重ねて表示）
         if self.state == RobotState.STANDBY:
@@ -993,6 +1168,23 @@ class EntranceRobot:
             for i, s in enumerate(line_surfs):
                 self.screen.blit(s, (bx + pad_x, by + pad_y + i * (line_h + line_gap)))
 
+        # テキスト入力欄（対話モード中）
+        if self.state == RobotState.INTERACTION:
+            t = time.time()
+            cursor = "|" if int(t * 2) % 2 == 0 else " "
+            display = f"▶ {self._typing_text}{cursor}"
+            inp_surf = self._subtitle_font.render(display, True, (255, 255, 160))
+            iw, ih = inp_surf.get_size()
+            pad_x, pad_y = 16, 6
+            box_w = max(iw + pad_x * 2, sw // 3)
+            bx = sw // 2 - box_w // 2
+            by = sh - bar_h - ih - pad_y * 2 - 6
+            bg = pygame.Surface((box_w, ih + pad_y * 2), pygame.SRCALPHA)
+            bg.fill((30, 30, 60, 200))
+            pygame.draw.rect(bg, (100, 100, 200, 180), (0, 0, box_w, ih + pad_y * 2), 2, border_radius=6)
+            self.screen.blit(bg, (bx, by))
+            self.screen.blit(inp_surf, (bx + pad_x, by + pad_y))
+
         self._draw_volume_bar()
 
     # ── 起動 ──────────────────────────────────────────────────
@@ -1014,8 +1206,20 @@ class EntranceRobot:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         running = False
-                    elif event.key == pygame.K_SPACE:
+                    elif event.key == pygame.K_SPACE and self.state == RobotState.STANDBY:
                         self.toggle()
+                    elif self.state == RobotState.INTERACTION:
+                        if event.key == pygame.K_RETURN:
+                            text = self._typing_text.strip()
+                            self._typing_text = ""
+                            if text:
+                                self._text_input_queue.put(text)
+                        elif event.key == pygame.K_BACKSPACE:
+                            self._typing_text = self._typing_text[:-1]
+                        elif event.key == pygame.K_SPACE:
+                            self._typing_text += " "
+                        elif event.unicode and event.unicode.isprintable():
+                            self._typing_text += event.unicode
                     elif isinstance(self._tts, GttsTTS):
                         changed = True
                         if event.key == pygame.K_UP:
