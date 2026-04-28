@@ -232,6 +232,10 @@ class EntranceRobot:
         pygame.display.set_caption("精密ラボ. 案内マップ")
 
         self.map_images = self._load_map_images()
+        logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+        logo_pil = PILImage.open(logo_path).convert("RGBA")
+        logo_arr = pygame.image.fromstring(logo_pil.tobytes(), logo_pil.size, "RGBA").convert_alpha()
+        self._logo_surf = logo_arr
 
         # 左右それぞれのサーフェスを管理
         self._surface_lock = threading.Lock()
@@ -257,6 +261,10 @@ class EntranceRobot:
         self._video_frame_queue: queue.Queue = queue.Queue(maxsize=2)
         self._start_volume_monitor()
         self._bubble_font_main = self._load_jp_font(14, weight=6)
+        noto_bold = "/Users/yoshidakouji/Library/Fonts/NotoSansCJKjp-Bold.otf"
+        self._side_font       = pygame.font.Font(noto_bold, 42)
+        self._side_font_mid   = pygame.font.Font(noto_bold, 32)
+        self._side_font_small = pygame.font.Font(noto_bold, 30)
         self._listen_font = self._load_jp_font(32)
         self._label_font = self._load_jp_font(22)
         self._subtitle_font = self._load_jp_font(30, weight=7)
@@ -595,7 +603,7 @@ class EntranceRobot:
         try:
             self._ts("Gemini 開始")
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="gemini-2.5-flash",
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=full_system,
@@ -900,19 +908,92 @@ class EntranceRobot:
         with self._surface_lock:
             map_surf = self._map_surface
 
-        self.screen.fill((20, 20, 20))
+        self.screen.fill((35, 10, 20))
 
-        # マップを全画面に拡張
-        scale_m = min(sw / map_surf.get_width(), content_h / map_surf.get_height())
+        # マップを全画面に拡張（上部に吹き出し用の余白を確保）
+        top_h = 50
+        avail_h = content_h - top_h
+        scale_m = min(sw / map_surf.get_width(), avail_h / map_surf.get_height())
         mw = int(map_surf.get_width() * scale_m)
         mh = int(map_surf.get_height() * scale_m)
         map_x = sw // 2 - mw // 2
-        map_y = content_h // 2 - mh // 2
-        scaled_map = pygame.transform.scale(map_surf, (mw, mh))
+        map_y = top_h + avail_h // 2 - mh // 2
+        scaled_map = pygame.transform.smoothscale(map_surf, (mw, mh))
         self.screen.blit(scaled_map, (map_x, map_y))
 
         # 吹き出し（待ち時間 / 整理券不要）
         self._draw_congestion_bubbles(map_x, map_y, mw, mh)
+
+        # 右上ロゴ
+        margin_w = sw - (map_x + mw)
+        logo_w = margin_w - 10
+        logo_h = int(self._logo_surf.get_height() * logo_w / self._logo_surf.get_width())
+        logo_scaled = pygame.transform.smoothscale(self._logo_surf, (logo_w, logo_h))
+        logo_x = map_x + mw + (margin_w - logo_w) // 2
+        logo_y = map_y
+        self.screen.blit(logo_scaled, (logo_x, logo_y))
+
+        # サイドラベル（縦書き）
+        label_cy = top_h + avail_h // 2
+        left_cx  = map_x // 2
+        right_cx = map_x + mw + (sw - map_x - mw) // 2
+        # groups: グループのリスト。各グループは (text, vertical, font) のリスト
+        # グループ間には大きめの余白を入れる
+        def _build_items(groups):
+            """グループリストからサーフェスリスト（グループ境界にNoneを挿入）を返す"""
+            result = []
+            for i, group in enumerate(groups):
+                if i > 0:
+                    result.append(None)  # グループ間の区切り
+                for text, vertical, font in group:
+                    if vertical:
+                        result += [font.render(c, True, (255, 255, 255)) for c in text]
+                    else:
+                        s = font.render(text, True, (255, 255, 255))
+                        result.append(pygame.transform.rotozoom(s, -90, 1.0))
+            return result
+
+        char_gap = 2
+        right_cx_center = map_x + mw + margin_w // 2
+        right_col_l = right_cx_center - 22   # 左列: （精密工学科企画）
+        right_col_r = right_cx_center + 22   # 右列: →精密ラボ
+
+        char_h_small = self._side_font_small.get_height()
+        for groups, cx, y_offset in [
+            ([[("←都市工学科企画", True, self._side_font_mid)]], left_cx, 0),
+            ([[("→精密ラボ", True, self._side_font)]], right_col_r, 0),
+            ([[("（", False, self._side_font_small), ("精密工学科企画", True, self._side_font_small), ("）", False, self._side_font_small)]], right_col_l, char_h_small * 3),
+        ]:
+            items = _build_items(groups)
+            total_h = sum(s.get_height() for s in items) + char_gap * (len(items) - 1)
+            y = label_cy - total_h // 2 + y_offset
+            for s in items:
+                self.screen.blit(s, (cx - s.get_width() // 2, y))
+                y += s.get_height() + char_gap
+
+        # 企画写真オーバーレイ（対話モードで企画が特定されたとき前面に表示）
+        with self._surface_lock:
+            photo_surf = self._right_surface
+        if photo_surf is not None:
+            max_pw = int(mw * 0.45)
+            max_ph = int(mh * 0.55)
+            scale_p = min(max_pw / photo_surf.get_width(), max_ph / photo_surf.get_height())
+            pw = int(photo_surf.get_width() * scale_p)
+            ph = int(photo_surf.get_height() * scale_p)
+            with self._surface_lock:
+                hloc = self._highlight_loc
+            if hloc is not None:
+                # 企画の位置と反対側のマップ上に表示
+                ex, ey = hloc.get("px", hloc["x"]), hloc.get("py", hloc["y"])
+                cx_ratio = 0.25 if ex > 0.5 else 0.75
+                cy_ratio = 0.30 if ey > 0.5 else 0.70
+                px = map_x + int(mw * cx_ratio) - pw // 2
+                py = map_y + int(mh * cy_ratio) - ph // 2
+            else:
+                px = map_x + mw * 3 // 4 - pw // 2
+                py = map_y + mh // 2 - ph // 2
+            scaled_photo = pygame.transform.smoothscale(photo_surf, (pw, ph))
+            self.screen.blit(scaled_photo, (px, py))
 
         # ハイライト丸アニメーション
         with self._surface_lock:
