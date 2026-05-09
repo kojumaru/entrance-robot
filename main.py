@@ -14,8 +14,10 @@ import random
 from dotenv import load_dotenv
 load_dotenv()
 
+import collections
 import cv2
 import math
+import mediapipe as mp
 import multiprocessing
 import tempfile
 import threading
@@ -94,6 +96,17 @@ THINKING_INTERVAL = 0.5  # セリフとセリフの間の無音（秒）
 
 DISPLAY_WIDTH = 1200
 DISPLAY_HEIGHT = 700
+
+# ── 顔検知によるモード切替 ────────────────────────────────────────────────────
+FACE_CAMERA_ID           = 0     # カメラデバイスID
+FACE_TRIGGER_SECONDS     = 1.5   # 正面検知が継続したら対話モードに切替
+FACE_MIN_AREA_RATIO      = 0.06  # 顔面積/画面面積の最小値（遠すぎる人を無視）
+FACE_CENTER_MARGIN       = 0.40  # 顔中心X座標が画面中心から許容するずれ（0.5が端）
+FACE_SYMMETRY_THRESH     = 0.08  # 鼻が目の中間からずれる許容量（顔幅比）
+FACE_EYE_LEVEL_THRESH    = 0.10  # 左右目の高さ差の許容量（顔高さ比）
+FACE_STABILITY_FRAMES    = 8     # 安定判定に使う過去フレーム数
+FACE_STABILITY_MAX_MOVE  = 0.05  # 安定とみなす最大移動量（画面幅比）
+FACE_LOOP_INTERVAL       = 0.10  # 顔検知ループの間隔（秒）≒10fps
 
 # ── 企画場所の座標（マップ画像全体を1.0とした相対座標）────────────────────────
 # x,y  : ハイライト丸の中心（マップ全体を1.0とした相対座標）
@@ -212,6 +225,93 @@ def create_tts_engine(name: str) -> TTSEngine:
     return cls()
 
 
+# ── 顔検知クラス ───────────────────────────────────────────────────────────────
+
+class FaceDetector:
+    """
+    MediaPipe Face Detection を使って「話しかけようとしている人」を検知する。
+    条件: 顔が正面を向いている + 十分近い + 画面中央付近 + 位置が安定
+    """
+
+    def __init__(self) -> None:
+        self._mp_detection = mp.solutions.face_detection.FaceDetection(
+            model_selection=0,          # 0=2m以内の近距離モデル
+            min_detection_confidence=0.6,
+        )
+        self._cap = cv2.VideoCapture(FACE_CAMERA_ID)
+        self._history: collections.deque = collections.deque(maxlen=FACE_STABILITY_FRAMES)
+
+    def is_intent_detected(self) -> bool:
+        """話しかけようとしている人を検知したら True を返す"""
+        ret, frame = self._cap.read()
+        if not ret:
+            return False
+
+        h, w = frame.shape[:2]
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self._mp_detection.process(rgb)
+
+        if not results.detections:
+            self._history.clear()
+            return False
+
+        # 候補の中で「面積×中央寄り度」が最高の顔を選ぶ
+        best = None
+        best_score = -1.0
+        for det in results.detections:
+            bb = det.location_data.relative_bounding_box
+            area = bb.width * bb.height
+            cx = bb.xmin + bb.width / 2
+            if area < FACE_MIN_AREA_RATIO:
+                continue
+            if abs(cx - 0.5) > FACE_CENTER_MARGIN:
+                continue
+            score = area * (1.0 - abs(cx - 0.5))
+            if score > best_score:
+                best_score = score
+                best = (det, bb, cx, bb.ymin + bb.height / 2)
+
+        if best is None:
+            self._history.clear()
+            return False
+
+        det, bb, cx, cy = best
+
+        # キーポイントで正面向き判定
+        # 順序: 0=右目, 1=左目, 2=鼻先, 3=口中央, 4=右耳, 5=左耳
+        kps = det.location_data.relative_keypoints
+        right_eye, left_eye, nose = kps[0], kps[1], kps[2]
+
+        eye_mid_x = (right_eye.x + left_eye.x) / 2
+        face_w = bb.width if bb.width > 1e-6 else 1e-6
+        face_h = bb.height if bb.height > 1e-6 else 1e-6
+
+        nose_offset   = abs(nose.x - eye_mid_x) / face_w
+        eye_level_diff = abs(right_eye.y - left_eye.y) / face_h
+
+        if nose_offset > FACE_SYMMETRY_THRESH or eye_level_diff > FACE_EYE_LEVEL_THRESH:
+            self._history.clear()
+            return False
+
+        # 位置の安定性チェック（歩いて通り過ぎる人を弾く）
+        self._history.append((cx, cy))
+        if len(self._history) < FACE_STABILITY_FRAMES:
+            return False
+
+        xs = [p[0] for p in self._history]
+        ys = [p[1] for p in self._history]
+        if (max(xs) - min(xs)) > FACE_STABILITY_MAX_MOVE:
+            return False
+        if (max(ys) - min(ys)) > FACE_STABILITY_MAX_MOVE:
+            return False
+
+        return True
+
+    def release(self) -> None:
+        self._cap.release()
+        self._mp_detection.close()
+
+
 class RobotState(Enum):
     STANDBY = "standby"
     INTERACTION = "interaction"
@@ -260,7 +360,7 @@ class EntranceRobot:
         self._video_generation: int = 0
         self._video_frame_queue: queue.Queue = queue.Queue(maxsize=2)
         self._start_volume_monitor()
-        self._bubble_font_main = self._load_jp_font(14, weight=6)
+        self._bubble_font_main = self._load_jp_font(18, weight=6)
         noto_bold = "/Users/yoshidakouji/Library/Fonts/NotoSansCJKjp-Bold.otf"
         self._side_font       = pygame.font.Font(noto_bold, 42)
         self._side_font_mid   = pygame.font.Font(noto_bold, 32)
@@ -271,6 +371,7 @@ class EntranceRobot:
 
         self._congestion: dict = {}  # 混雑状況キャッシュ
         self._start_firebase_poller()
+        self._start_face_watcher()
 
     # ── ユーティリティ ────────────────────────────────────────
 
@@ -603,7 +704,7 @@ class EntranceRobot:
         try:
             self._ts("Gemini 開始")
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.1-flash-lite-preview",
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=full_system,
@@ -677,9 +778,9 @@ class EntranceRobot:
 
     def _draw_bubble(self, text: str, cx: int, cy: int, color: tuple) -> None:
         stroke = 2
-        pad_x, pad_y = 7, 5
-        arrow_w = 8
-        arrow_h = 8
+        pad_x, pad_y = 10, 8
+        arrow_w = 10
+        arrow_h = 10
         r_outer = 10
         r_inner = r_outer - stroke
 
@@ -1065,6 +1166,42 @@ class EntranceRobot:
 
         self._draw_volume_bar()
 
+    # ── 顔検知によるモード自動切替 ────────────────────────────
+
+    def _start_face_watcher(self) -> None:
+        self._face_watcher_stop = threading.Event()
+        self._face_detector = FaceDetector()
+        threading.Thread(target=self._face_watcher_loop, daemon=True).start()
+
+    def _face_watcher_loop(self) -> None:
+        intent_start: float | None = None
+        while not self._face_watcher_stop.is_set():
+            if self.state != RobotState.STANDBY:
+                intent_start = None
+                time.sleep(0.2)
+                continue
+            try:
+                detected = self._face_detector.is_intent_detected()
+            except Exception:
+                time.sleep(0.2)
+                continue
+
+            if detected:
+                if intent_start is None:
+                    intent_start = time.time()
+                    print("  [顔検知] 正面検知開始...")
+                elif time.time() - intent_start >= FACE_TRIGGER_SECONDS:
+                    print("  [顔検知] 対話モードへ切替")
+                    intent_start = None
+                    self._switch_to(RobotState.INTERACTION)
+                    time.sleep(1.0)  # 切替直後の再トリガー防止
+            else:
+                if intent_start is not None:
+                    print("  [顔検知] リセット")
+                intent_start = None
+
+            time.sleep(FACE_LOOP_INTERVAL)
+
     # ── 起動 ──────────────────────────────────────────────────
 
     def run(self) -> None:
@@ -1109,6 +1246,8 @@ class EntranceRobot:
             clock.tick(30)
 
         self._stop_event.set()
+        self._face_watcher_stop.set()
+        self._face_detector.release()
         pygame.quit()
 
 
