@@ -27,6 +27,7 @@ from pathlib import Path
 
 import argparse
 import subprocess
+import serial as _serial
 
 import fitz  # PyMuPDF
 import openai
@@ -110,6 +111,7 @@ EXHIBIT_POSTER_MAP = {
 }
 
 FIREBASE_POLL_INTERVAL = 30  # 混雑状況の更新間隔（秒）
+FACE_TUNE_SAVE_PATH = Path(__file__).parent / "face_tune.json"  # チューニング値の保存先
 QUEUE_BUFFER_MINUTES = 10   # 番号呼び出し後に列に並ぶまでの目安時間（分）
 
 STANDBY_MESSAGES = [
@@ -138,9 +140,9 @@ DISPLAY_WIDTH = 1200
 DISPLAY_HEIGHT = 700
 
 # ── 顔検知によるモード切替 ────────────────────────────────────────────────────
-FACE_CAMERA_ID           = 0     # カメラデバイスID
+FACE_CAMERA_ID           = 1     # カメラデバイスID
 FACE_TRIGGER_SECONDS     = 1.5   # 正面検知が継続したら対話モードに切替
-FACE_MIN_AREA_RATIO      = 0.06  # 顔面積/画面面積の最小値（遠すぎる人を無視）
+FACE_MIN_AREA_RATIO      = 0.01  # 顔面積/画面面積の最小値（遠すぎる人を無視）
 FACE_CENTER_MARGIN       = 0.40  # 顔中心X座標が画面中心から許容するずれ（0.5が端）
 FACE_SYMMETRY_THRESH     = 0.08  # 鼻が目の中間からずれる許容量（顔幅比）
 FACE_EYE_LEVEL_THRESH    = 0.10  # 左右目の高さ差の許容量（顔高さ比）
@@ -266,14 +268,20 @@ def create_tts_engine(name: str) -> TTSEngine:
 
 # ── 顔検知チューニングパラメータ定義 ─────────────────────────────────────────
 # (FaceDetector の属性名, 表示名, 変化量, 最小値, 最大値)
+MIC_PARAMS = [
+    # (EntranceRobotの属性名, 表示名, 変化量, 最小値, 最大値, int?)
+    ("_mic_threshold",   "音声認識閾値        ［背景ノイズより少し高い値に。低すぎると常時反応、高すぎると無視される］", 10, 50, 2000, True),
+    ("_listen_timeout",  "音声待機タイムアウト ［この秒数内に声が入らないと対話モードを終了して待機に戻る］",             1,  3,  30,   True),
+]
+
 FACE_PARAMS = [
-    ("trigger_seconds",    "起動秒数      ", 0.1,  0.3, 5.0),
-    ("min_area_ratio",     "最小顔面積    ", 0.01, 0.01, 0.30),
-    ("center_margin",      "中央許容幅    ", 0.05, 0.05, 0.50),
-    ("symmetry_thresh",    "正面対称閾値  ", 0.01, 0.01, 0.30),
-    ("eye_level_thresh",   "目高さ差閾値  ", 0.01, 0.01, 0.30),
-    ("stability_max_move", "安定移動閾値  ", 0.01, 0.01, 0.20),
-    ("stability_frames",   "安定フレーム数", 1,    2,    20),
+    ("trigger_seconds",    "起動秒数         ［正面を向き続けると対話モードへ移行するまでの秒数］", 0.1,  0.3, 5.0),
+    ("min_area_ratio",     "最小顔面積比      ［顔が画面面積の何割以上なら有効か（小さいと遠い人を無視）］", 0.01, 0.01, 0.30),
+    ("center_margin",      "中央許容ずれ幅    ［顔の中心X座標が画面中心からどれだけずれていいか（0.5=端まで許容）］", 0.05, 0.05, 0.50),
+    ("symmetry_thresh",    "正面対称閾値      ［鼻が左右目の中間からずれていい量（小さいほど真正面のみ検知）］", 0.01, 0.01, 0.30),
+    ("eye_level_thresh",   "目の高さ差閾値    ［左右の目の高さ差の許容量（小さいほど傾き補正が厳しい）］", 0.01, 0.01, 0.30),
+    ("stability_max_move", "安定移動量閾値    ［フレーム間の顔の移動量がこれ以下なら安定とみなす（画面幅比）］", 0.01, 0.01, 0.20),
+    ("stability_frames",   "安定フレーム数    ［安定判定に使う過去フレーム数（多いほど動きへの感度が下がる）］", 1,    2,    20),
 ]
 
 # ── 顔検知クラス ───────────────────────────────────────────────────────────────
@@ -293,7 +301,7 @@ class FaceDetector:
         self._cap = cv2.VideoCapture(FACE_CAMERA_ID)
         self._history: collections.deque = collections.deque(maxlen=FACE_STABILITY_FRAMES)
 
-        # チューニング可能パラメータ（実行時に変更可）
+        # チューニング可能パラメータ（実行時に変更可・保存/ロード対応）
         self.trigger_seconds    = FACE_TRIGGER_SECONDS
         self.min_area_ratio     = FACE_MIN_AREA_RATIO
         self.center_margin      = FACE_CENTER_MARGIN
@@ -309,6 +317,26 @@ class FaceDetector:
         self._debug_intent: bool = False
         self._debug_reason: str   = "未初期化"  # 最後の判定結果の理由
         self._debug_frame_ratio: float = 0.0   # フレーム蓄積率 0.0〜1.0
+        self._load_tune()
+
+    def _load_tune(self) -> None:
+        """保存済みチューニング値をJSONから読み込む"""
+        if not FACE_TUNE_SAVE_PATH.exists():
+            return
+        try:
+            data = json.loads(FACE_TUNE_SAVE_PATH.read_text(encoding="utf-8"))
+            for attr, *_ in FACE_PARAMS:
+                if attr in data:
+                    setattr(self, attr, data[attr])
+            print(f"  [顔検知チューニング] 保存済み値をロード: {FACE_TUNE_SAVE_PATH}")
+        except Exception as e:
+            print(f"  [顔検知チューニング] ロード失敗: {e}")
+
+    def save_tune(self) -> None:
+        """現在のチューニング値をJSONに保存する"""
+        data = {attr: getattr(self, attr) for attr, *_ in FACE_PARAMS}
+        FACE_TUNE_SAVE_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"  [顔検知チューニング] 保存しました: {FACE_TUNE_SAVE_PATH}")
 
     def is_intent_detected(self) -> bool:
         """話しかけようとしている人を検知したら True を返す"""
@@ -443,11 +471,25 @@ class RobotState(Enum):
 # ── ロボット本体 ───────────────────────────────────────────────────────────────
 
 class EntranceRobot:
-    def __init__(self, tts_name: str = "voicevox") -> None:
+    def __init__(self, tts_name: str = "voicevox", serial_port: str | None = None, mic_index: int | None = None) -> None:
         self.client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
         self.state = RobotState.STANDBY
         self._stop_event = threading.Event()
         self._current_gen: int = 0  # _switch_toのたびに増加。旧スレッドが自身の失効を検知する
+
+        # ── Arduino シリアル接続 ──────────────────────────────────
+        self._arduino: _serial.Serial | None = None
+        self._is_speaking: bool = False  # デフォルト: 非発話(1)
+        if serial_port:
+            try:
+                self._arduino = _serial.Serial(serial_port, 115200, timeout=1)
+                time.sleep(2)  # Arduino リセット待ち（接続時にArduinoがリセットするため必須）
+                print(f"  [Arduino] 接続完了: {serial_port}")
+                self._start_serial_sender()
+                self._start_serial_reader()
+            except Exception as e:
+                print(f"  [Arduino] 接続失敗: {e}")
+                self._arduino = None
         self._current_thread: threading.Thread | None = None
 
         pygame.init()
@@ -501,6 +543,10 @@ class EntranceRobot:
         self._start_face_watcher()
 
         self._face_tuning_visible = False  # チューニングパネル表示フラグ
+        self._mic_index      = mic_index        # マイクデバイスインデックス（None=デフォルト）
+        self._mic_threshold  = MIC_THRESHOLD   # 音声認識エネルギー閾値
+        self._listen_timeout = LISTEN_TIMEOUT  # 音声待機タイムアウト（秒）
+        self._load_mic_tune()
         self._face_tuning_idx = 0          # 選択中のパラメータインデックス
         self._face_tune_font = self._load_jp_font(15)
 
@@ -510,6 +556,60 @@ class EntranceRobot:
         """タイムスタンプ付きでログ出力"""
         t = time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}"
         print(f"  [{t}] {label}")
+
+    def _set_speaking(self, speaking: bool) -> None:
+        """発話状態を設定し、即座にArduinoへ送信（バッファをflushして古いデータを破棄）"""
+        self._is_speaking = speaking
+        val = 0 if speaking else 1
+        label = "発話中" if speaking else "非発話"
+        if self._arduino and self._arduino.is_open:
+            try:
+                self._arduino.reset_input_buffer()   # Arduino受信バッファの古いデータを捨てる
+                self._arduino.reset_output_buffer()  # 未送信データも捨てる
+                self._arduino.write(f"{val}\n".encode())
+                print(f"  [Arduino] 送信: {val} ({label})")
+            except Exception as e:
+                print(f"  [Arduino] 送信エラー: {e}")
+
+    def _start_serial_sender(self) -> None:
+        """5秒ごとに現在の状態をArduinoへ再送するハートビートスレッド"""
+        def _heartbeat():
+            while not self._stop_event.is_set():
+                time.sleep(5)
+                if self._arduino and self._arduino.is_open:
+                    val = 0 if self._is_speaking else 1
+                    try:
+                        self._arduino.write(f"{val}\n".encode())
+                    except Exception:
+                        pass
+        threading.Thread(target=_heartbeat, daemon=True).start()
+
+    def _start_serial_reader(self) -> None:
+        """Arduinoからの受信データを常時モニタしてターミナルに出力するスレッドを起動"""
+        def _read():
+            print("  [Arduino] 受信モニタ 開始")
+            last_text = None
+            while not self._stop_event.is_set():
+                if not (self._arduino and self._arduino.is_open):
+                    time.sleep(0.5)
+                    continue
+                try:
+                    if self._arduino.in_waiting > 0:
+                        data = self._arduino.read(self._arduino.in_waiting)
+                        # デコード試行 → 失敗時はhex表示
+                        try:
+                            text = data.decode("utf-8").strip()
+                        except UnicodeDecodeError:
+                            text = f"[hex] {data.hex()}"
+                        if text and text != last_text:
+                            print(f"  [Arduino] 受信: {text}")
+                            last_text = text
+                    else:
+                        time.sleep(0.05)
+                except Exception as e:
+                    print(f"  [Arduino] 受信エラー: {e}")
+                    time.sleep(0.5)
+        threading.Thread(target=_read, daemon=True).start()
 
     def _load_jp_font(self, size: int, weight: int = 3) -> pygame.font.Font:
         candidates = (
@@ -774,12 +874,14 @@ class EntranceRobot:
         if self.state == RobotState.INTERACTION:
             self._subtitle = text
         pygame.mixer.music.load(tmp_path)
+        self._set_speaking(True)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
             if self._stop_event.is_set() or interrupted.is_set():
                 pygame.mixer.music.stop()
                 break
             time.sleep(0.05)
+        self._set_speaking(False)
         self._subtitle = ""
         os.unlink(tmp_path)
         return not interrupted.is_set()
@@ -789,16 +891,16 @@ class EntranceRobot:
     def listen(self) -> tuple[str | None, bool]:
         """(認識テキスト or None, タイムアウトか) を返す"""
         recognizer = sr.Recognizer()
-        recognizer.energy_threshold = MIC_THRESHOLD
+        recognizer.energy_threshold = self._mic_threshold
         recognizer.dynamic_energy_threshold = False
 
         self._is_listening = True
         try:
-            with sr.Microphone() as source:
+            with sr.Microphone(device_index=self._mic_index) as source:
                 self._ts("マイク待機 開始")
                 try:
                     audio = recognizer.listen(
-                        source, timeout=LISTEN_TIMEOUT, phrase_time_limit=10
+                        source, timeout=self._listen_timeout, phrase_time_limit=10
                     )
                     self._ts("録音 完了")
                 except sr.WaitTimeoutError:
@@ -1006,12 +1108,16 @@ class EntranceRobot:
             print(f"  [呼び込み] {STANDBY_MESSAGES[idx]}")
             # 合成済みWAVを直接再生（合成処理なし）
             pygame.mixer.music.load(self._standby_wavs[idx])
+            self._set_speaking(True)
             pygame.mixer.music.play()
             while pygame.mixer.music.get_busy():
                 if _stale():
                     pygame.mixer.music.stop()
-                    return
+                    break
                 time.sleep(0.05)
+            self._set_speaking(False)
+            if _stale():
+                return
             interval = random.uniform(5, 7)
             for _ in range(int(interval * 10)):
                 if _stale():
@@ -1034,13 +1140,16 @@ class EntranceRobot:
             self._right_surface = None
         self._subtitle = "こんにちは！精密ラボの企画についてなんでもお答えいたします！"
         pygame.mixer.music.load(self._greeting_wav)
+        self._set_speaking(True)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
             if _stale():
                 pygame.mixer.music.stop()
+                self._set_speaking(False)
                 self._subtitle = ""
                 return
             time.sleep(0.05)
+        self._set_speaking(False)
         self._subtitle = ""
         history: list = []  # 対話モード中の会話履歴（モード終了で破棄）
         while not _stale():
@@ -1082,13 +1191,16 @@ class EntranceRobot:
             # loops=-1で無限ループ再生 → SDL(C)が管理するためVOICEVOXのGIL保持中も継続
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(self._get_response_wav, user_input, history)
+                self._set_speaking(True)
                 self._thinking_channel.play(self._thinking_loop_sound, loops=-1)
                 while not future.done():
                     if _stale():
                         self._thinking_channel.stop()
+                        self._set_speaking(False)
                         return
                     time.sleep(0.05)
                 self._thinking_channel.stop()
+                self._set_speaking(False)
                 if _stale():
                     return
                 wav_path, exhibit, speech, photo_pil, should_continue = future.result()
@@ -1118,12 +1230,14 @@ class EntranceRobot:
             # 合成済みWAVを直接再生
             self._subtitle = speech
             pygame.mixer.music.load(wav_path)
+            self._set_speaking(True)
             pygame.mixer.music.play()
             while pygame.mixer.music.get_busy():
                 if _stale():
                     pygame.mixer.music.stop()
                     break
                 time.sleep(0.05)
+            self._set_speaking(False)
             self._subtitle = ""
             os.unlink(wav_path)
 
@@ -1405,36 +1519,68 @@ class EntranceRobot:
 
     # ── 顔検知チューニング ────────────────────────────────────
 
+    def _load_mic_tune(self) -> None:
+        if not FACE_TUNE_SAVE_PATH.exists():
+            return
+        try:
+            data = json.loads(FACE_TUNE_SAVE_PATH.read_text(encoding="utf-8"))
+            for attr, *_ in MIC_PARAMS:
+                if attr in data:
+                    setattr(self, attr, data[attr])
+        except Exception as e:
+            print(f"  [マイクチューニング] ロード失敗: {e}")
+
+    def _save_mic_tune(self) -> None:
+        try:
+            data = json.loads(FACE_TUNE_SAVE_PATH.read_text(encoding="utf-8")) if FACE_TUNE_SAVE_PATH.exists() else {}
+        except Exception:
+            data = {}
+        for attr, *_ in MIC_PARAMS:
+            data[attr] = getattr(self, attr)
+        FACE_TUNE_SAVE_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"  [マイクチューニング] 保存しました: {FACE_TUNE_SAVE_PATH}")
+
     def _handle_face_tune_key(self, key) -> None:
+        total = len(FACE_PARAMS) + len(MIC_PARAMS)
         if key == pygame.K_UP:
-            self._face_tuning_idx = (self._face_tuning_idx - 1) % len(FACE_PARAMS)
+            self._face_tuning_idx = (self._face_tuning_idx - 1) % total
         elif key == pygame.K_DOWN:
-            self._face_tuning_idx = (self._face_tuning_idx + 1) % len(FACE_PARAMS)
+            self._face_tuning_idx = (self._face_tuning_idx + 1) % total
         elif key in (pygame.K_LEFT, pygame.K_RIGHT):
-            attr, label, step, minv, maxv = FACE_PARAMS[self._face_tuning_idx]
-            cur = getattr(self._face_detector, attr)
-            delta = step if key == pygame.K_RIGHT else -step
-            if attr == "stability_frames":
-                new_val = int(max(minv, min(maxv, cur + delta)))
+            idx = self._face_tuning_idx
+            if idx < len(FACE_PARAMS):
+                attr, label, step, minv, maxv = FACE_PARAMS[idx]
+                obj = self._face_detector
+                is_int = (attr == "stability_frames")
             else:
-                new_val = round(max(minv, min(maxv, cur + delta)), 4)
-            setattr(self._face_detector, attr, new_val)
-            print(f"  [顔チューニング] {label.strip()} = {new_val}")
+                attr, label, step, minv, maxv, is_int = MIC_PARAMS[idx - len(FACE_PARAMS)]
+                obj = self
+            cur = getattr(obj, attr)
+            delta = step if key == pygame.K_RIGHT else -step
+            new_val = int(max(minv, min(maxv, cur + delta))) if is_int else round(max(minv, min(maxv, cur + delta)), 4)
+            setattr(obj, attr, new_val)
+            print(f"  [チューニング] {label.split('［')[0].strip()} = {new_val}")
 
     def _render_face_tuning_panel(self, above_h: int = 0) -> None:
         fd = self._face_detector
         font = self._face_tune_font
         line_h = font.get_height() + 4
         pad = 10
-        labels = [
+        face_labels = [
             (f"  {'→' if i == self._face_tuning_idx else ' '} "
              f"{label}: {getattr(fd, attr):.2f}" if attr != "stability_frames"
              else f"  {'→' if i == self._face_tuning_idx else ' '} {label}: {getattr(fd, attr)}")
             for i, (attr, label, *_) in enumerate(FACE_PARAMS)
         ]
+        mic_offset = len(FACE_PARAMS)
+        mic_labels = [
+            f"  {'→' if (mic_offset + i) == self._face_tuning_idx else ' '} {label}: {int(getattr(self, attr))}"
+            for i, (attr, label, *_) in enumerate(MIC_PARAMS)
+        ]
         header = "[ 顔検知チューニング ]"
-        footer = "F:閉じる  ↑↓:選択  ←→:変更"
-        lines = [header] + labels + [footer]
+        mic_header = "  --- 音声認識 ---"
+        footer = "F:閉じる  ↑↓:選択  ←→:変更  S:保存"
+        lines = [header] + face_labels + [mic_header] + mic_labels + [footer]
         panel_w = max(font.size(l)[0] for l in lines) + pad * 2
         panel_h = line_h * len(lines) + pad * 2
 
@@ -1445,10 +1591,20 @@ class EntranceRobot:
         panel.fill((0, 0, 0, 180))
         self.screen.blit(panel, (px, py))
 
+        # lines の構成: [header, *face_labels, mic_header, *mic_labels, footer]
+        # インデックス→選択中パラメータの対応
+        face_end = 1 + len(FACE_PARAMS)          # face_labels の終わり（exclusive）
+        mic_start = face_end + 1                  # mic_labels の開始（mic_headerの次）
         for i, line in enumerate(lines):
-            color = (255, 220, 80) if i == 0 or i == len(lines) - 1 else (
-                (100, 255, 150) if (i - 1) == self._face_tuning_idx else (220, 220, 220)
-            )
+            if i == 0 or i == len(lines) - 1:
+                color = (255, 220, 80)            # ヘッダー・フッター
+            elif i == face_end:
+                color = (180, 180, 255)           # --- 音声認識 --- セクション区切り
+            elif 1 <= i < face_end:
+                color = (100, 255, 150) if (i - 1) == self._face_tuning_idx else (220, 220, 220)
+            else:
+                mic_i = i - mic_start
+                color = (100, 255, 150) if (len(FACE_PARAMS) + mic_i) == self._face_tuning_idx else (220, 220, 220)
             surf = font.render(line, True, color)
             self.screen.blit(surf, (px + pad, py + pad + i * line_h))
 
@@ -1528,6 +1684,9 @@ class EntranceRobot:
                         pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT
                     ):
                         self._handle_face_tune_key(event.key)
+                    elif self._face_tuning_visible and event.key == pygame.K_s:
+                        self._face_detector.save_tune()
+                        self._save_mic_tune()
                     elif isinstance(self._tts, GttsTTS):
                         changed = True
                         if event.key == pygame.K_UP:
@@ -1567,10 +1726,23 @@ class EntranceRobot:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="精密ラボ 受付ロボット")
     parser.add_argument(
+        "--serial",
+        default=None,
+        metavar="PORT",
+        help="ArduinoのシリアルポートURL (例: /dev/tty.usbmodem1101)",
+    )
+    parser.add_argument(
+        "--mic",
+        type=int,
+        default=None,
+        metavar="INDEX",
+        help="マイクのデバイスインデックス (例: 0)",
+    )
+    parser.add_argument(
         "--tts",
         choices=["voicevox", "gtts"],
         default="gtts",
         help="音声合成エンジン (default: gtts)",
     )
     args = parser.parse_args()
-    EntranceRobot(tts_name=args.tts).run()
+    EntranceRobot(tts_name=args.tts, serial_port=args.serial, mic_index=args.mic).run()

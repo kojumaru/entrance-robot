@@ -3,7 +3,9 @@ venv/
 voicevox_core/
 __pycache__/
 *.pyc
+*.log
 .vscode/
+.DS_Store
 audio/
 download
 firebase_admin.json

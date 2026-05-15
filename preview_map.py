@@ -43,7 +43,7 @@ INFO_H       = 140          # 下部情報パネルの高さ
 MAP_H        = WIN_H - INFO_H
 STEP_FINE    = 0.003
 STEP_COARSE  = 0.015
-MAP_IMG_PATH = os.path.join(_HERE, "案内図", "館内図（吹き出しなし）.png")
+MAP_IMG_PATH = os.path.join(_HERE, "案内図", "facility_map.png")
 
 # ── pygame 初期化 ─────────────────────────────────────────────────
 pygame.init()
