@@ -7,7 +7,6 @@
 
 import json
 import os
-import queue
 import threading
 import time
 from pathlib import Path
@@ -16,7 +15,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import argparse
-import cv2
 import math
 import pygame
 import PIL.Image as PILImage
@@ -128,9 +126,6 @@ class EntranceRobot:
         self._surface_lock = threading.Lock()
         self._map_surface: pygame.Surface = self._pil_to_surface(self.map_images[0])
 
-        self._video_generation: int = 0
-        self._video_frame_queue: queue.Queue = queue.Queue(maxsize=2)
-
         noto_bold = "/Users/yoshidakouji/Library/Fonts/NotoSansCJKjp-Bold.otf"
         self._bubble_font_main = self._load_jp_font(18, weight=6)
         self._side_font       = pygame.font.Font(noto_bold, 42)
@@ -140,7 +135,6 @@ class EntranceRobot:
 
         self._congestion: dict = {}
         self._start_firebase_poller()
-        self._start_video_player()
 
     # ── Arduino シリアル ─────────────────────────────────────────
 
@@ -250,44 +244,6 @@ class EntranceRobot:
                 time.sleep(FIREBASE_POLL_INTERVAL)
 
         threading.Thread(target=_poll, daemon=True).start()
-
-    # ── 動画再生 ──────────────────────────────────────────────────
-
-    def _start_video_player(self) -> None:
-        movies_dir = Path(__file__).parent / "movies"
-        movies_dir.mkdir(exist_ok=True)
-
-        self._video_generation += 1
-        my_generation = self._video_generation
-
-        def _play():
-            exts = ("*.mp4", "*.mov", "*.avi", "*.mkv")
-            while not self._stop_event.is_set() and self._video_generation == my_generation:
-                files = []
-                for ext in exts:
-                    files.extend(sorted(movies_dir.glob(ext)))
-                if not files:
-                    time.sleep(1)
-                    continue
-                for video_path in files:
-                    if self._stop_event.is_set() or self._video_generation != my_generation:
-                        return
-                    cap = cv2.VideoCapture(str(video_path))
-                    fps = cap.get(cv2.CAP_PROP_FPS) or 30
-                    frame_interval = 1.0 / fps
-                    while not self._stop_event.is_set() and self._video_generation == my_generation:
-                        ret, frame = cap.read()
-                        if not ret:
-                            break
-                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        try:
-                            self._video_frame_queue.put_nowait(frame_rgb)
-                        except queue.Full:
-                            pass
-                        time.sleep(frame_interval)
-                    cap.release()
-
-        threading.Thread(target=_play, daemon=True).start()
 
     # ── 吹き出し描画 ──────────────────────────────────────────────
 
