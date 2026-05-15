@@ -7,6 +7,9 @@
 
 import json
 import os
+import random
+import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -93,6 +96,38 @@ EXHIBIT_LOCATIONS = {
 }
 
 
+STANDBY_MESSAGES = [
+    "精密ラボへようこそ！1階右と3階で工学のさまざまな企画を展示しています！",
+]
+
+STANDBY_INTERVAL_RANGE = (10, 15)  # 呼び込み間隔（秒）の最小・最大
+
+# ── TTS (gTTS) ─────────────────────────────────────────────────────────────────
+
+_WORD_FIXES = {
+    "工学": "こう学",
+}
+
+def _synthesize_gtts(text: str) -> str:
+    """テキストをgTTSで合成してWAVファイルパスを返す"""
+    from gtts import gTTS
+    for word, reading in _WORD_FIXES.items():
+        text = text.replace(word, reading)
+    mp3 = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+    mp3.close()
+    gTTS(text, lang="ja", tld="co.jp").save(mp3.name)
+    wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    wav.close()
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", mp3.name,
+         "-filter:a", "atempo=1.1,asetrate=24000*1.5,aresample=24000",
+         "-ac", "1", "-sample_fmt", "s16", wav.name],
+        check=True, capture_output=True,
+    )
+    os.unlink(mp3.name)
+    return wav.name
+
+
 # ── ロボット本体 ───────────────────────────────────────────────────────────────
 
 class EntranceRobot:
@@ -135,6 +170,12 @@ class EntranceRobot:
 
         self._congestion: dict = {}
         self._start_firebase_poller()
+
+        self._subtitle: str = ""
+
+        # 呼び込み音声を事前合成してバックグラウンドで再生開始
+        self._standby_wavs: list[str] = []
+        threading.Thread(target=self._presynth_and_start_calling, daemon=True).start()
 
     # ── Arduino シリアル ─────────────────────────────────────────
 
@@ -244,6 +285,45 @@ class EntranceRobot:
                 time.sleep(FIREBASE_POLL_INTERVAL)
 
         threading.Thread(target=_poll, daemon=True).start()
+
+    # ── 待機モード呼び込み ────────────────────────────────────────
+
+    def _presynth_and_start_calling(self) -> None:
+        print("  [事前合成] 呼び込みメッセージを合成中...")
+        try:
+            wavs = [_synthesize_gtts(msg) for msg in STANDBY_MESSAGES]
+            self._standby_wavs = wavs
+            print(f"  [事前合成] {len(wavs)}件完了")
+        except Exception as e:
+            print(f"  [事前合成] 失敗: {e}")
+            return
+        self._calling_loop()
+
+    def _calling_loop(self) -> None:
+        print("[呼び込み] ループ開始")
+        msg_index = 0
+        while not self._stop_event.is_set():
+            idx = msg_index % len(self._standby_wavs)
+            msg_index += 1
+            print(f"  [呼び込み] {STANDBY_MESSAGES[idx]}")
+            self._subtitle = STANDBY_MESSAGES[idx]
+            try:
+                pygame.mixer.music.load(self._standby_wavs[idx])
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy():
+                    if self._stop_event.is_set():
+                        pygame.mixer.music.stop()
+                        self._subtitle = ""
+                        return
+                    time.sleep(0.05)
+            except Exception as e:
+                print(f"  [呼び込み] 再生エラー: {e}")
+            self._subtitle = ""
+            interval = random.uniform(*STANDBY_INTERVAL_RANGE)
+            for _ in range(int(interval * 10)):
+                if self._stop_event.is_set():
+                    return
+                time.sleep(0.1)
 
     # ── 吹き出し描画 ──────────────────────────────────────────────
 
@@ -372,6 +452,25 @@ class EntranceRobot:
             ("精密工学科企画", True, self._side_font_small),
             ("）", False, self._side_font_small),
         ], right_col_l, char_h_small * 3)
+
+        # 字幕（呼び込み中のみ表示）
+        subtitle = self._subtitle
+        if subtitle:
+            self._draw_subtitle(subtitle, sw, sh)
+
+    def _draw_subtitle(self, text: str, sw: int, sh: int) -> None:
+        pad_x, pad_y = 20, 10
+        font = self._bubble_font_main
+        text_surf = font.render(text, True, (255, 255, 255))
+        tw, th = text_surf.get_size()
+        bg_w = tw + pad_x * 2
+        bg_h = th + pad_y * 2
+        bg_x = (sw - bg_w) // 2
+        bg_y = sh - bg_h - 16
+        bg_surf = pygame.Surface((bg_w, bg_h), pygame.SRCALPHA)
+        bg_surf.fill((0, 0, 0, 180))
+        self.screen.blit(bg_surf, (bg_x, bg_y))
+        self.screen.blit(text_surf, (bg_x + pad_x, bg_y + pad_y))
 
     # ── 起動 ──────────────────────────────────────────────────────
 
