@@ -161,11 +161,14 @@ class EntranceRobot:
         self._surface_lock = threading.Lock()
         self._map_surface: pygame.Surface = self._pil_to_surface(self.map_images[0])
 
-        noto_bold = "/Users/yoshidakouji/Library/Fonts/NotoSansCJKjp-Bold.otf"
+        noto_bold = str(Path.home() / "Library/Fonts/NotoSansCJK.ttc")
         self._bubble_font_main = self._load_jp_font(18, weight=6)
         self._side_font       = pygame.font.Font(noto_bold, 42)
+        self._side_font.set_bold(True)
         self._side_font_mid   = pygame.font.Font(noto_bold, 32)
+        self._side_font_mid.set_bold(True)
         self._side_font_small = pygame.font.Font(noto_bold, 30)
+        self._side_font_small.set_bold(True)
         self._label_font = self._load_jp_font(22)
 
         self._congestion: dict = {}
@@ -343,8 +346,8 @@ class EntranceRobot:
                 waiting = info["waiting"]
                 minutes = info["minutes"]
                 if waiting == 0:
-                    text = "10分以内"
-                    color = (20, 150, 65)
+                    text = "整理券不要"
+                    color = (60, 90, 160)
                 elif minutes <= 10:
                     text = f"{minutes}分待ち"
                     color = (190, 120, 0)
