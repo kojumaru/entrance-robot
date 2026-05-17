@@ -346,8 +346,8 @@ class EntranceRobot:
                 waiting = info["waiting"]
                 minutes = info["minutes"]
                 if waiting == 0:
-                    text = "整理券不要"
-                    color = (60, 90, 160)
+                    text = "~10分待ち"
+                    color = (20, 150, 65)
                 elif minutes <= 10:
                     text = f"{minutes}分待ち"
                     color = (190, 120, 0)
