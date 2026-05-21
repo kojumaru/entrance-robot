@@ -40,10 +40,8 @@ import speech_recognition as sr
 MIC_THRESHOLD = 300
 LISTEN_TIMEOUT = 8
 
-VOICEVOX_SPEAKER = 8        # 1: ずんだもん(ノーマル), 3: ずんだもん(あまあま), 8: 春日部つむぎ
 BARGE_IN_THRESHOLD = 10000  # バージイン検知の閾値
 BARGE_IN_DELAY = 0.5        # 再生開始後、この秒数は監視しない（エコー対策）
-_VOICEVOX_DIR = Path(__file__).parent / "voicevox_core"
 _FIREBASE_CREDENTIAL = Path(__file__).parent / "firebase_admin.json"
 
 # 企画key → 企画名マッピング（Geminiの出力・Firebase両方で使用）
@@ -130,33 +128,6 @@ class TTSEngine:
     def close(self): pass
 
 
-class VoicevoxTTS(TTSEngine):
-    def __init__(self):
-        from voicevox_core.blocking import Onnxruntime, OpenJtalk, Synthesizer, VoiceModelFile
-        import warnings; warnings.filterwarnings("ignore")
-        print("  [VOICEVOX] 初期化中...")
-        ort_path = _VOICEVOX_DIR / "onnxruntime" / "lib" / Onnxruntime.LIB_VERSIONED_FILENAME
-        ort = Onnxruntime.load_once(filename=str(ort_path))
-        dict_path = _VOICEVOX_DIR / "dict" / "open_jtalk_dic_utf_8-1.11"
-        self._synth = Synthesizer(
-            ort, OpenJtalk(dict_path),
-            acceleration_mode="CPU",
-            cpu_num_threads=max(multiprocessing.cpu_count() // 2, 1),
-        )
-        vvm_path = _VOICEVOX_DIR / "models" / "vvms" / "0.vvm"
-        with VoiceModelFile.open(vvm_path) as model:
-            self._synth.load_voice_model(model)
-        print("  [VOICEVOX] 初期化完了")
-
-    def synthesize(self, text: str) -> str:
-        query = self._synth.create_audio_query(text, VOICEVOX_SPEAKER)
-        wav = self._synth.synthesis(query, VOICEVOX_SPEAKER)
-        f = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        f.write(wav); f.close()
-        return f.name
-
-
-
 class GttsTTS(TTSEngine):
     """gTTS (Google翻訳TTS) — 無料・要インターネット"""
     TLD_LIST = ["com", "co.jp", "co.uk", "com.au", "ca"]
@@ -201,15 +172,8 @@ class GttsTTS(TTSEngine):
         return wav.name
 
 
-def create_tts_engine(name: str) -> TTSEngine:
-    engines = {
-        "voicevox": VoicevoxTTS,
-        "gtts":     GttsTTS,
-    }
-    cls = engines.get(name)
-    if cls is None:
-        raise ValueError(f"Unknown TTS engine: {name}")
-    return cls()
+def create_tts_engine() -> TTSEngine:
+    return GttsTTS()
 
 
 class RobotState(Enum):
@@ -220,7 +184,7 @@ class RobotState(Enum):
 # ── ロボット本体 ───────────────────────────────────────────────────────────────
 
 class EntranceRobot:
-    def __init__(self, tts_name: str = "voicevox") -> None:
+    def __init__(self) -> None:
         self.client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         self.state = RobotState.STANDBY
         self._stop_event = threading.Event()
@@ -239,8 +203,7 @@ class EntranceRobot:
         self._right_surface: pygame.Surface | None = None
         self._highlight_loc: dict | None = None  # アニメーション用ハイライト座標
 
-        self._tts: TTSEngine = create_tts_engine(tts_name)
-        print(f"  [TTS] エンジン: {tts_name}")
+        self._tts: TTSEngine = create_tts_engine()
         self._standby_wavs: list[str] = self._presynth_standby_messages()
         self._greeting_wav: str = self._presynth_wav("こんにちは！何かご質問はありますか？")
         self._thinking_wavs: list[str] = [self._presynth_wav(m) for m in THINKING_MESSAGES]
@@ -1062,12 +1025,4 @@ class EntranceRobot:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="精密ラボ 受付ロボット")
-    parser.add_argument(
-        "--tts",
-        choices=["voicevox", "gtts"],
-        default="gtts",
-        help="音声合成エンジン (default: gtts)",
-    )
-    args = parser.parse_args()
-    EntranceRobot(tts_name=args.tts).run()
+    EntranceRobot().run()
