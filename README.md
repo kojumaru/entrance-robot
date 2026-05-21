@@ -3,180 +3,145 @@
 東大五月祭「精密Lab.」展示向けの受付・案内ロボットシステム。
 
 ![デモ](demo.png)
-来場者の音声による質問に答え、展示企画の場所をマップと写真・動画で案内する。
+
+館内マップをリアルタイムで表示し、Firebase から取得した混雑状況をオーバーレイ表示する。
+ブランチによっては音声合成・音声認識・Gemini API との対話機能も搭載。
 
 ---
 
-## システム Abstruct
+## ブランチ一覧（引き継ぎ資料）
+
+ブランチは **機能追加の積み重ね**で成長している。下記の順で派生している。
+
+```
+main
+ ├─ no-voicevox          … VOICEVOXなし・gTTS軽量版
+ ├─ with-other-exhibits-info … 他団体企画の場所案内を追加
+ └─ fullmap              … 全面マップ表示
+      └─ face-detection  … 顔検知自動切替・Arduino サーボ制御
+           └─ mayfes     … 五月祭2026 実際に使用したブランチ（最終形）
+```
+
+### `main` — フル機能の安定版
+
+対話モード付きのフル機能ブランチ。
+
+- **待機モード**: 呼び込みメッセージを VOICEVOX で音声合成して発話、動画をループ再生
+- **対話モード**: スペースキーで切替。マイク入力 → Google STT → Gemini API → VOICEVOX 読み上げ
+- **Firebase 連携**: 整理券待ち人数をリアルタイムで取得してプロンプトに注入
+- **マップ表示**: 企画の場所を脈動アニメーション（赤丸＋波紋）でハイライト
+
+依存: `GEMINI_API_KEY`、VOICEVOX Core（ローカル）、Firebase Admin SDK
+
+### `no-voicevox` — VOICEVOX なし・軽量版
+
+main から VOICEVOX を取り除き gTTS（Google Text-to-Speech）に置き換えたブランチ。
+VOICEVOX のモデルダウンロード（数 GB）が不要になるため、環境構築が楽になる。
+
+- TTS を `--tts gtts` / `--tts voicevox` で CLI から切り替え可能
+- 起動時間が大幅に短縮される
+
+依存: `GEMINI_API_KEY`、Firebase Admin SDK（VOICEVOX 不要）
+
+### `with-other-exhibits-info` — 他団体企画案内
+
+main に加えて五月祭全体マップを表示し、精密 Lab. 以外の他団体企画の場所も案内できるようにしたブランチ。
+
+- `assets/festival_map.png` として五月祭全体マップを追加
+- `stitch_map.py` で複数マップを結合するユーティリティを追加
+- Gemini にキャッシュ機能を追加（API コール削減）
+- キーボード（矢印キーなど）で企画マップを切り替え可能
+
+依存: `GEMINI_API_KEY`、VOICEVOX Core、Firebase Admin SDK
+
+### `fullmap` — 全面フロアマップ表示
+
+動画エリアを廃止して、画面全体をフロアマップ表示に使うレイアウト変更ブランチ。
+
+- 画面右半分の動画パネルをなくし、マップを全画面表示
+- 精密Lab. のロゴ画像を左上にオーバーレイ
+- サイドラベル（企画名リスト）を右側に表示
+- 企画写真をマップ上にオーバーレイ表示
+
+### `face-detection` — 顔検知自動切替・Arduino サーボ制御
+
+fullmap の全機能＋カメラ顔検知・Arduino 連携を追加した最多機能ブランチ。
+
+- **顔検知自動切替**: OpenCV で来場者の顔を検知し、待機 ↔ 対話モードを自動切替
+  - `face_tune.json` で検知パラメータを調整
+- **Arduino サーボ制御**: Python が発話状態を USB シリアルで Arduino に送信し、サーボモーターを動かす
+  - 発話中: モード 0（servo3, servo5 がランダム動作）
+  - 非発話: モード 1（servo10, servo11 がランダム動作）
+- **外部マイク対応**: `--mic` オプションでデバイスインデックスを指定
+- **OpenAI 移行対応**: Gemini → OpenAI の切り替えを準備（ポスター表示も追加）
+
+依存: `GEMINI_API_KEY`、VOICEVOX Core、Firebase Admin SDK、Arduino（任意）
+
+起動例:
+```bash
+python main.py --serial /dev/cu.usbmodem1101 --mic 2
+```
+
+#### Arduino スケッチ（`arduino_servo.ino`）
+
+サーボ 4 本（ピン 3, 5, 10, 11）を制御。
+シリアルで `0\n` または `1\n` を受信するとモードを切り替える。
+
+```
+モード 0（発話中）: servo3・servo5 が 1 秒ごとにランダム動作
+モード 1（非発話）: servo10・servo11 が 2 秒ごとにランダム動作
+```
+
+ボーレート: 115200
+
+### `mayfes` — 五月祭2026 実際使用版（最終形）
+
+**五月祭当日に実際に動かしたブランチ**。face-detection をベースに、会場での運用に合わせて機能を絞り込んだ。
+
+- 対話モード・音声認識・カメラ入力を完全削除（しゃべらないロボット）
+- 動画ループ再生を削除
+- 呼び込みメッセージを gTTS で合成して一定間隔で発話
+- 画面下部に字幕テキストを表示
+- 「工学」の誤読み仮名修正（`_WORD_FIXES`）
+- Arduino シリアル通信は残存（発話状態を送信）
+
+起動例:
+```bash
+python main.py
+python main.py --serial /dev/cu.usbmodem1101
+```
+
+---
+
+## システム構成（mayfes ブランチ）
 
 ```
 Firebase Firestore（整理券待ち人数）← 30秒ごとにポーリング
     ↓
-マイク入力
+gTTS（呼び込みメッセージを音声合成）→ スピーカー出力
     ↓
-Google STT（音声認識）
+pygame（マップ・字幕・混雑状況を画面表示）
     ↓
-Gemini API（回答・企画名を JSON で生成）← 混雑状況をプロンプトに注入
-    ↓
-VOICEVOX（音声合成） → スピーカー出力
-        ↓
-    企画名が含まれる場合
-        ↓
-マップ上に赤丸アニメーション表示 ＋ 企画写真
+Arduino（シリアルで発話状態を送信）→ サーボモーター動作
 ```
-
----
-
-## 動作モード
-
-### 待機モード (STANDBY)
-
-- 起動直後から自動で開始
-- `movies/` ディレクトリの動画をループ再生（右パネル）
-- 5〜7秒おきに、起動時に事前合成した呼び込みメッセージを発話
-- 左パネルには常に館内マップを表示
-
-### 対話モード (INTERACTION)
-
-- スペースキーで待機モードから切り替え（仮）
-- 「こんにちは！何かご質問はありますか？」と発話してマイク待機
-- 来場者の発話を認識 → Gemini に送信 → 回答を音声で読み上げ
-- 企画の場所を聞かれた場合:
-  - マップの該当箇所に**脈動＋波紋アニメーション**で赤丸を表示
-  - 右パネルに企画写真を表示
-- 8秒間無音が続くと自動的に待機モードへ復帰
-
-### モード切替
-
-| 操作                     | 動作                   |
-| ------------------------ | ---------------------- |
-| スペースキー             | 待機 ↔ 対話 の切り替え |
-| ESC / ウィンドウを閉じる | 終了                   |
-
----
-
-## モード切替の仕組み（外部連携向け）
-
-> **注**: 現在はスペースキーで手動切替しているが、将来的にウェブカメラの画像認識による自動切替に置き換える予定。
-
-### 現在の実装（スペースキー）
-
-`main.py` の `run()` メソッド内でキーイベントを監視し、スペースキーが押されると `toggle()` を呼ぶ。
-
-```python
-# main.py の run() 内
-elif event.key == pygame.K_SPACE:
-    self.toggle()
-```
-
-### `toggle()` の動作
-
-```python
-def toggle(self) -> None:
-    next_state = (
-        RobotState.INTERACTION if self.state == RobotState.STANDBY
-        else RobotState.STANDBY
-    )
-    self._switch_to(next_state)
-```
-
-現在の状態を反転して `_switch_to()` を呼ぶだけ。
-
-### `_switch_to()` の内部動作
-
-```
-① _stop_event.set()          … 今動いているループに「止まれ」を通知
-② join(timeout=2)            … ループが終わるまで最大2秒待機
-③ _stop_event.clear()        … フラグをリセット
-④ state = new_state          … 状態を更新
-⑤ 新しいスレッドを起動        … 対応するループ関数をバックグラウンドで開始
-```
-
-### 画像認識に向けて: 連携方法
-
-カメラ側のスクリプトから `EntranceRobot` インスタンスの **`toggle()`** または **`_switch_to()`** を呼ぶだけで切り替えられる。
-
-```python
-# 例: 人物を検知したら対話モードへ、いなくなったら待機モードへ
-if person_detected and robot.state == RobotState.STANDBY:
-    robot._switch_to(RobotState.INTERACTION)
-
-if not person_detected and robot.state == RobotState.INTERACTION:
-    robot._switch_to(RobotState.STANDBY)
-```
-
-**注意点**:
-
-- `_switch_to()` はどのスレッドから呼んでも安全（スレッドセーフ）
-- 対話モード中は `listen()` のブロッキングにより、切替反応が最大 **8秒** 遅れる場合がある
-- 対話モード → 待機モードへの強制遷移は、音声認識の途中でも止まる（`_stop_event` で制御）
 
 ---
 
 ## 画面レイアウト
 
 ```
-┌──────────────────────────────────────────────────┐
-│                    │                             │
-│   館内マップ（左半分）  │  動画 or 企画写真（右半分）  │
-│   ※常に固定          │  ※待機中:動画 / 対話中:写真  │
-│                    │                             │
-├──────────────────────────────────────────────────┤
-│  音量バー  RMS: 312  mic: 800（白線）              │ ← 28px
-└──────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│              館内マップ（全画面）                        │
+│              ※左上にロゴ、右にサイドラベル              │
+│              ※企画ハイライト時は赤丸アニメーション      │
+│                                                         │
+├─────────────────────────────────────────────────────────┤
+│  字幕テキスト（呼び込みメッセージ）                      │ ← 下部
+└─────────────────────────────────────────────────────────┘
 ```
 
 - ウィンドウはリサイズ可能（アスペクト比を維持してスケーリング）
-- 画面下部の音量バーでマイク感度の調整が可能
-
----
-
-## 技術構成
-
-### 音声認識
-
-- **ライブラリ**: SpeechRecognition
-- **エンジン**: Google STT（無料・APIキー不要）
-- **言語**: 日本語 (ja-JP)
-- `MIC_THRESHOLD = 800` でマイク感度を調整（大きいほど鈍感）
-- 8秒間無音でタイムアウト → 待機モードへ
-
-### AI 応答生成
-
-- **API**: Google Gemini API (`google-genai`)
-- **モデル**: `gemini-2.5-flash`
-- **出力形式**: JSON固定
-
-```json
-{
-  "speech": "読み上げる回答文",
-  "exhibit": "企画名 or null"
-}
-```
-
-- `exhibit` が返ってきた場合のみマップにハイライト表示
-- Gemini がひらがなを漢字に誤変換する場合は `EXHIBIT_ALIASES` で正規化
-
-### 音声合成
-
-- **エンジン**: VOICEVOX Core（ローカル実行・オフライン動作）
-- **話者**: `VOICEVOX_SPEAKER = 8`（春日部つむぎ）
-- **再生**: pygame.mixer
-- 呼び込みメッセージは**起動時に事前合成**してWAVキャッシュ → 動画再生を止めない
-
-### マップ表示
-
-- `assets/企画場所.pdf` を PyMuPDF (dpi=150) で画像に変換
-- 企画座標は `EXHIBIT_LOCATIONS` 辞書に相対座標 (0.0〜1.0) で手動登録
-- ハイライトは pygame で毎フレーム描画（アニメーション）
-  - 赤丸：sin 波で半径が脈動
-  - 波紋：外側に広がって透明になる半透明の輪
-
-### 動画再生
-
-- OpenCV (`cv2`) でフレームをデコード → numpy 配列としてキューに積む
-- メインスレッドがキューから取り出して pygame サーフェスに変換（スレッド安全）
-- 世代番号管理により待機モード復帰時に古い動画スレッドを確実に停止
 
 ---
 
@@ -185,20 +150,27 @@ if not person_detected and robot.state == RobotState.INTERACTION:
 ```
 entrance_robot/
 ├── main.py                    # メインロジック
-├── README.md                  # 本ファイル
-├── spec.txt                   # 仕様書
+├── README.md                  # 本ファイル（引き継ぎ資料）
+├── arduino_servo.ino          # Arduino サーボ制御スケッチ
 ├── requirements.txt           # 依存ライブラリ
 ├── .env                       # APIキー（Git管理外）
-├── .gitignore
+├── firebase_admin.json        # Firebase 秘密鍵（Git管理外）
+├── face_tune.json             # 顔検知パラメータ（face-detection ブランチ）
+├── spec.txt                   # 初期仕様書
+├── entrance_robot_instruction.md  # 最初の Claude への依頼内容
+├── preview_map.py             # 企画座標確認・調整ツール
+├── stitch_map.py              # マップ結合ツール（with-other-exhibits-info）
 ├── prompts/
 │   └── system_prompt.txt      # Gemini へのシステムプロンプト
 ├── assets/
-│   ├── 企画場所.pdf            # 館内マップ（1ページ）
-│   └── photos/                # 企画写真
-│       └── {企画名}.jpg        # ファイル名 = 企画名と完全一致
-├── movies/                    # 待機中に再生する動画
+│   ├── 企画場所.pdf            # 館内フロアマップ（1ページ）
+│   ├── logo.png               # 精密Lab. ロゴ
+│   ├── festival_map.png       # 五月祭全体マップ（with-other-exhibits-info）
+│   └── photos/                # 企画ポスター・写真（PDF形式）
+│       └── {キー名}.pdf
+├── movies/                    # 待機中ループ動画（main/face-detection ブランチ）
 │   └── *.mp4 / *.mov 等
-└── voicevox_core/             # VOICEVOX のモデル・辞書・ランタイム
+└── voicevox_core/             # VOICEVOX モデル・辞書・ランタイム（main ブランチ）
     ├── onnxruntime/
     ├── dict/
     └── models/
@@ -212,10 +184,16 @@ entrance_robot/
 
 ```bash
 pip install -r requirements.txt
+```
+
+**mayfes / no-voicevox ブランチ**は VOICEVOX 不要。以下は不要。
+
+**main / face-detection ブランチ**で VOICEVOX を使う場合は追加でインストール:
+```bash
 pip install "https://github.com/VOICEVOX/voicevox_core/releases/download/0.16.4/voicevox_core-0.16.4-cp310-abi3-macosx_11_0_arm64.whl"
 ```
 
-### 2. VOICEVOX モデルのダウンロード（初回のみ）
+### 2. VOICEVOX モデルのダウンロード（main / face-detection ブランチのみ・初回のみ）
 
 ```bash
 curl -sSfL https://github.com/VOICEVOX/voicevox_core/releases/latest/download/download-osx-arm64 -o download
@@ -223,61 +201,77 @@ chmod +x download
 ./download --exclude c-api
 ```
 
-### 3. 環境変数の設定
+### 3. ffmpeg のインストール（mayfes / no-voicevox ブランチで必要）
 
-`.env` ファイルを各自作成し、 Gemini API キーを記載:
+gTTS で生成した MP3 を WAV に変換するために使用。
+
+```bash
+brew install ffmpeg
+```
+
+### 4. 環境変数の設定
+
+`.env` ファイルをプロジェクトルートに作成:
 
 ```
-GEMINI_API_KEY=your_api_key_here
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-### 4. Firebase サービスアカウントキーの設置
+> mayfes ブランチは Gemini を使わないため不要。
 
-混雑状況のリアルタイム取得に Firebase Admin SDK を使用しています。
+### 5. Firebase サービスアカウントキーの設置
 
 1. [Firebase Console](https://console.firebase.google.com/) → プロジェクト設定 → サービスアカウント
-2. 「新しい秘密鍵の生成」でJSONファイルをダウンロード
-3. ダウンロードしたファイルをプロジェクトルートに `firebase_admin.json` という名前で配置
+2. 「新しい秘密鍵の生成」で JSON ファイルをダウンロード
+3. プロジェクトルートに `firebase_admin.json` という名前で配置
 
 ```
 entrance_robot/
-└── firebase_admin.json   ← ここに置く（.gitignore済み・Gitには含まれない）
+└── firebase_admin.json   ← ここに置く（.gitignore 済み）
 ```
 
-> このファイルはGit管理外のため、各自で取得・配置が必要です。
-
-### 5. 起動
+### 6. 起動
 
 ```bash
+# 基本起動
 python main.py
+
+# Arduino あり（face-detection / mayfes ブランチ）
+python main.py --serial /dev/cu.usbmodem1101
+
+# 外部マイク指定（face-detection ブランチ）
+python main.py --mic 2
+
+# TTS 切替（no-voicevox ブランチ）
+python main.py --tts gtts
+python main.py --tts voicevox
 ```
 
 ---
 
 ## コンテンツの追加・更新
 
-### 企画写真の追加
+### 企画ポスターの追加
 
 ```
-assets/photos/{企画名}.jpg
+assets/photos/{キー名}.pdf
 ```
 
-企画名は `EXHIBIT_LOCATIONS` のキーと完全一致させること。
-
-### 待機動画の追加
-
-```
-movies/{任意のファイル名}.mp4
-```
-
-対応形式: mp4, mov, avi, mkv。複数ある場合はファイル名の昇順でループ再生。
+キー名は `EXHIBIT_KEY_MAP` の左辺と一致させること（例: `truck`, `space`, `media`）。
 
 ### 企画座標の調整
 
-`main.py` の `EXHIBIT_LOCATIONS` を編集:
+`preview_map.py` で座標を確認しながら調整できる:
+
+```bash
+python preview_map.py
+```
+
+調整後は `main.py` の `EXHIBIT_LOCATIONS` を更新:
 
 ```python
-"企画名": {"x": 0.52, "y": 0.14},  # マップ全体を1.0とした相対座標
+"ジャングル・スコープ": {"x": 0.393, "y": 0.086, "bx": 0.381, "by": 0.016},
+#                        ↑マップ上の赤丸       ↑吹き出しの位置
 ```
 
 ### 呼び込みメッセージの変更
@@ -287,9 +281,17 @@ movies/{任意のファイル名}.mp4
 ```python
 STANDBY_MESSAGES = [
     "精密ラボへようこそ！...",
-    "こんにちは！...",
 ]
 ```
+
+### 企画・混雑状況の追加
+
+新しい企画を案内対象に追加するには:
+
+1. `EXHIBIT_KEY_MAP` にキーと企画名を追加
+2. `EXHIBIT_LOCATIONS` に座標を追加
+3. `assets/photos/{キー名}.pdf` に写真を追加
+4. `prompts/system_prompt.txt` に企画の説明を追記
 
 ---
 
@@ -297,28 +299,39 @@ STANDBY_MESSAGES = [
 
 `main.py` 冒頭の定数で動作を調整できる。
 
-| 定数               | 初期値 | 説明                                                             |
-| ------------------ | ------ | ---------------------------------------------------------------- |
-| `MIC_THRESHOLD`    | 800    | マイク感度（高いほど鈍感）。画面下部の音量バーで確認しながら調整 |
-| `LISTEN_TIMEOUT`   | 8      | 無音タイムアウト（秒）。この時間無音なら待機モードへ             |
-| `VOICEVOX_SPEAKER` | 8      | 話者ID（8: 春日部つむぎ、1: ずんだもん、3: ずんだもんあまあま）  |
+| 定数                     | 初期値    | 説明                                              |
+| ------------------------ | --------- | ------------------------------------------------- |
+| `FIREBASE_POLL_INTERVAL` | 30        | Firebase ポーリング間隔（秒）                     |
+| `DISPLAY_WIDTH`          | 1200      | ウィンドウ幅（px）                                |
+| `DISPLAY_HEIGHT`         | 700       | ウィンドウ高さ（px）                              |
+| `STANDBY_INTERVAL_RANGE` | (10, 15)  | 呼び込み発話の間隔（秒）の最小・最大              |
+
+main ブランチ固有:
+
+| 定数               | 初期値 | 説明                                                         |
+| ------------------ | ------ | ------------------------------------------------------------ |
+| `MIC_THRESHOLD`    | 800    | マイク感度（高いほど鈍感）                                   |
+| `LISTEN_TIMEOUT`   | 8      | 無音タイムアウト（秒）。この時間無音なら待機モードへ         |
+| `VOICEVOX_SPEAKER` | 8      | 話者ID（8: 春日部つむぎ、1: ずんだもん）                    |
 
 ---
 
-## スレッド構成
+## スレッド構成（main ブランチ）
 
 ```
 メインスレッド          : pygame イベント処理・描画（30fps）
 ├─ 待機/対話スレッド    : モードロジック・音声合成・認識
 ├─ 動画再生スレッド     : OpenCV フレームデコード → キュー
-└─ 音量モニタースレッド : PyAudio でリアルタイム RMS 計測
+├─ 音量モニタースレッド : PyAudio でリアルタイム RMS 計測
+└─ Firebase ポーラー   : 30 秒ごとに混雑状況を取得
 ```
 
 ---
 
 ## 注意事項
 
-- VOICEVOXの音声を使用する際は「VOICEVOX:春日部つむぎ」のクレジット表記が必要
+- VOICEVOX の音声を使用する際は「VOICEVOX:春日部つむぎ」のクレジット表記が必要
 - Gemini API は無料枠に制限あり。使い切ると 429/503 エラーが発生するが、自動でエラーメッセージを発話してリトライ待機する
-- インターネット接続が必要（Google STT・Gemini API）
-- 音声認識は Google STT を使用（APIキー不要・無料）
+- Google STT・Gemini API はインターネット接続が必要（gTTS も同様）
+- `debug.log` にログが出力される（起動ごとに上書き）
+- `firebase_admin.json` と `.env` は Git 管理外。次回利用時は各自で再取得・再配置が必要
